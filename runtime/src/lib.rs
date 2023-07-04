@@ -269,7 +269,9 @@ impl pallet_sudo::Config for Runtime {
 
 impl pallet_account_abstraction::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
-	type WeightInfo = pallet_account_abstraction::weights::SubstrateWeight<Runtime>;
+	type RuntimeCall = RuntimeCall;
+	type CallFilter = frame_support::traits::Everything;
+	type WeightInfo = ();
 }
 
 // Create the runtime by composing the FRAME pallets that were previously configured.

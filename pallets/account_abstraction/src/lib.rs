@@ -80,6 +80,43 @@ pub mod pallet {
 		DecodeError,
 	}
 
+	#[pallet::validate_unsigned]
+	impl<T: Config> ValidateUnsigned for Pallet<T> {
+		type Call = Call<T>;
+
+		/// Validate unsigned call to this module.
+		///
+		/// By default unsigned transactions are disallowed, but implementing the validator
+		/// here we make sure that some particular calls (the ones produced by offchain worker)
+		/// are being whitelisted and marked as valid.
+		fn validate_unsigned(_source: TransactionSource, _call: &Self::Call) -> TransactionValidity {
+			ValidTransaction::with_tag_prefix("AccountAbstraction")
+				// We set base priority to 2**20 and hope it's included before any
+				// other transactions in the pool.
+				.priority((1u64 << 20).into())
+				// This transaction does not require anything else to go before into
+				// the pool. In theory we could require `previous_unsigned_at`
+				// transaction to go first, but it's not necessary in our case.
+				//.and_requires() We set the `provides` tag to be the same as
+				// `next_unsigned_at`. This makes sure only one transaction produced
+				// after `next_unsigned_at` will ever get to the transaction pool
+				// and will end up in the block. We can still have multiple
+				// transactions compete for the same "spot", and the one with higher
+				// priority will replace other one in the pool.
+				.and_provides("my_tag")
+				// The transaction is only valid for next 5 blocks. After that it's
+				// going to be revalidated by the pool.
+				.longevity(5)
+				// It's fine to propagate that transaction to other peers, which
+				// means it can be created even by nodes that don't produce blocks.
+				// Note that sometimes it's better to keep it for yourself (if you
+				// are the block producer), since for instance in some schemes
+				// others may copy your solution and claim a reward.
+				.propagate(true)
+				.build()
+		}
+	}
+
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
 		/// Meta-transaction from EVM compatible chains
@@ -92,8 +129,7 @@ pub mod pallet {
 			signature: [u8; 65]
 		) -> DispatchResultWithPostInfo {
 			use alloc::string::{String, ToString};
-			use frame_support::crypto::ecdsa::ECDSAExt;
-			use sp_core::{blake2_256, keccak_256, ecdsa};
+			use sp_io::hashing::{blake2_256, keccak_256};
 
 			// This is an unsigned transaction
 			ensure_none(origin)?;
@@ -110,11 +146,11 @@ pub mod pallet {
 			let Some(recovered_public_key) = Self::ecdsa_recover_public_key(&signature, &message_hash) else {
 				return Err(Error::<T>::InvalidSignature.into())
 			};
-			let public_key = ecdsa::Public::from_raw(recovered_public_key.serialize());
-			let recovered_eth_address = public_key.to_eth_address().or(Err(Error::<T>::Unexpected))?;
+			let public_key = recovered_public_key.serialize();
+			let recovered_eth_address: [u8; 20] = keccak_256(&recovered_public_key.serialize_uncompressed()[1..])[12..].try_into().or(Err(Error::<T>::Unexpected))?;
 			ensure!(recovered_eth_address == eth_address, Error::<T>::EthAddressMismatch);
 
-			let raw_account = blake2_256(&public_key.0);
+			let raw_account = blake2_256(&public_key);
 			let account = T::AccountId::decode(&mut &raw_account[..]).unwrap();
 			let call = <T as Config>::RuntimeCall::decode(&mut TrailingZeroInput::new(&call_data)).or(Err(Error::<T>::DecodeError))?;
 
