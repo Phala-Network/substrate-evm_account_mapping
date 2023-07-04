@@ -1,8 +1,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
-/// Edit this file to define custom logic or remove it if it is not needed.
-/// Learn more about FRAME and the core library of Substrate FRAME pallets:
-/// <https://docs.substrate.io/reference/frame-pallets/>
+extern crate alloc;
+
 pub use pallet::*;
 
 #[cfg(test)]
@@ -30,12 +29,17 @@ macro_rules! log {
 	};
 }
 
+use frame_support::{
+	dispatch::{Dispatchable, PostDispatchInfo, GetDispatchInfo, RawOrigin},
+	traits::{Contains, OriginTrait},
+};
+use sp_runtime::traits::TrailingZeroInput;
+
 #[frame_support::pallet]
 pub mod pallet {
 	use super::*;
 	use frame_support::pallet_prelude::*;
 	use frame_system::pallet_prelude::*;
-	use sp_core::keccak_256;
 
 	#[pallet::pallet]
 	pub struct Pallet<T>(_);
@@ -45,6 +49,15 @@ pub mod pallet {
 	pub trait Config: frame_system::Config {
 		/// Because this pallet emits events, it depends on the runtime's definition of an event.
 		type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
+
+		/// The overarching call type.
+		type RuntimeCall: Dispatchable<RuntimeOrigin = Self::RuntimeOrigin, PostInfo = PostDispatchInfo>
+			+ GetDispatchInfo
+			+ codec::Decode
+			+ IsType<<Self as frame_system::Config>::RuntimeCall>;
+
+		type CallFilter: Contains<<Self as frame_system::Config>::RuntimeCall>;
+
 		/// Type representing the weight of this pallet
 		type WeightInfo: WeightInfo;
 	}
@@ -53,14 +66,18 @@ pub mod pallet {
 	// https://docs.substrate.io/main-docs/build/events-errors/
 	#[pallet::event]
 	#[pallet::generate_deposit(pub(super) fn deposit_event)]
-	pub enum Event<T: Config> {}
+	pub enum Event<T: Config> {
+		/// A call just took place. \[result\]
+		CallDone { call_result: DispatchResult },
+	}
 
 	// Errors inform users that something went wrong.
 	#[pallet::error]
 	pub enum Error<T> {
+		Unexpected,
 		InvalidSignature,
 		EthAddressMismatch,
-		Unexpected,
+		DecodeError,
 	}
 
 	#[pallet::call]
@@ -74,19 +91,60 @@ pub mod pallet {
 			call_data: BoundedVec<u8, ConstU32<2048>>,
 			signature: [u8; 65]
 		) -> DispatchResultWithPostInfo {
+			use alloc::string::{String, ToString};
+			use frame_support::crypto::ecdsa::ECDSAExt;
+			use sp_core::{blake2_256, keccak_256, ecdsa};
+
 			// This is an unsigned transaction
 			ensure_none(origin)?;
 
 			let hexed_call_data = hex::encode(&call_data);
-			let eip191_message = format!("\x19Ethereum Signed Message:\n{}0x{}", hexed_call_data.len() + 2, hexed_call_data);
+			let hexed_call_data_len_string = ((hexed_call_data.len() + 2) as u32).to_string();
+
+			let mut eip191_message = String::from("\x19Ethereum Signed Message:\n");
+			eip191_message.push_str(&hexed_call_data_len_string);
+			eip191_message.push_str("0x");
+			eip191_message.push_str(&hexed_call_data);
+
 			let message_hash = keccak_256(eip191_message.as_bytes());
-			let Ok(recovered_pub_key) = sp_io::crypto::secp256k1_ecdsa_recover(&signature, &message_hash) else {
+			let Some(recovered_public_key) = Self::ecdsa_recover_public_key(&signature, &message_hash) else {
 				return Err(Error::<T>::InvalidSignature.into())
 			};
-			let recovered_eth_address: [u8; 20] = keccak_256(&recovered_pub_key)[12..].try_into().or(Err(Error::<T>::Unexpected))?;
+			let public_key = ecdsa::Public::from_raw(recovered_public_key.serialize());
+			let recovered_eth_address = public_key.to_eth_address().or(Err(Error::<T>::Unexpected))?;
 			ensure!(recovered_eth_address == eth_address, Error::<T>::EthAddressMismatch);
 
-			Ok(().into())
+			let raw_account = blake2_256(&public_key.0);
+			let account = T::AccountId::decode(&mut &raw_account[..]).unwrap();
+			let call = <T as Config>::RuntimeCall::decode(&mut TrailingZeroInput::new(&call_data)).or(Err(Error::<T>::DecodeError))?;
+
+			let mut origin: T::RuntimeOrigin = RawOrigin::Signed(account).into();
+			origin.add_filter(T::CallFilter::contains);
+			let res = call.dispatch(origin);
+
+			Self::deposit_event(Event::CallDone {
+				call_result: res.map(|_| ()).map_err(|e| e.error),
+			});
+
+			// TODO: need calculate the fee
+			Ok(Pays::No.into())
+		}
+	}
+
+	impl<T: Config> Pallet<T> {
+		pub(crate) fn ecdsa_recover_public_key(signature: &[u8; 65], message: &[u8; 32]) -> Option<secp256k1::PublicKey> {
+			use secp256k1::{
+				ecdsa::{RecoveryId, RecoverableSignature},
+				Message, Secp256k1,
+			};
+
+			let rid = RecoveryId::from_i32(
+				if signature[64] > 26 { signature[64] - 27 } else { signature[64] } as i32
+			).ok()?;
+			let sig = RecoverableSignature::from_compact(&signature[..64], rid).ok()?;
+			let message = Message::from_slice(message).ok()?;
+
+			Secp256k1::verification_only().recover_ecdsa(&message, &sig).ok()
 		}
 	}
 }
