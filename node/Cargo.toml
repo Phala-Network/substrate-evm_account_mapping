@@ -1,0 +1,81 @@
+[package]
+name = "node-template"
+version = "0.0.1"
+description = "A fresh FRAME-based Substrate node, ready for hacking."
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+edition = "2021"
+publish = false
+build = "build.rs"
+
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]
+
+[[bin]]
+name = "node-template"
+
+[dependencies]
+clap = { version = "4.2.5", features = ["derive"] }
+futures = { version = "0.3.21", features = ["thread-pool"] }
+
+sc-cli = { git = "https://github.com/paritytech/substrate", branch = "master" }
+sp-core = { git = "https://github.com/paritytech/substrate", branch = "master" }
+sc-executor = { git = "https://github.com/paritytech/substrate", branch = "master" }
+sc-network = { git = "https://github.com/paritytech/substrate", branch = "master" }
+sc-service = { git = "https://github.com/paritytech/substrate", branch = "master" }
+sc-telemetry = { git = "https://github.com/paritytech/substrate", branch = "master" }
+sc-transaction-pool = { git = "https://github.com/paritytech/substrate", branch = "master" }
+sc-transaction-pool-api = { git = "https://github.com/paritytech/substrate", branch = "master" }
+sc-consensus-aura = { git = "https://github.com/paritytech/substrate", branch = "master" }
+sp-consensus-aura = { git = "https://github.com/paritytech/substrate", branch = "master" }
+sc-consensus = { git = "https://github.com/paritytech/substrate", branch = "master" }
+sc-consensus-grandpa = { git = "https://github.com/paritytech/substrate", branch = "master" }
+sp-consensus-grandpa = { git = "https://github.com/paritytech/substrate", branch = "master" }
+sc-client-api = { git = "https://github.com/paritytech/substrate", branch = "master" }
+sp-runtime = { git = "https://github.com/paritytech/substrate", branch = "master" }
+sp-io = { git = "https://github.com/paritytech/substrate", branch = "master" }
+sp-timestamp = { git = "https://github.com/paritytech/substrate", branch = "master" }
+sp-inherents = { git = "https://github.com/paritytech/substrate", branch = "master" }
+sp-keyring = { git = "https://github.com/paritytech/substrate", branch = "master" }
+frame-system = { git = "https://github.com/paritytech/substrate", branch = "master" }
+pallet-transaction-payment = { git = "https://github.com/paritytech/substrate", branch = "master", default-features = false }
+
+# These dependencies are used for the node template's RPCs
+jsonrpsee = { version = "0.16.2", features = ["server"] }
+sp-api = { git = "https://github.com/paritytech/substrate", branch = "master" }
+sc-rpc-api = { git = "https://github.com/paritytech/substrate", branch = "master" }
+sp-blockchain = { git = "https://github.com/paritytech/substrate", branch = "master" }
+sp-block-builder = { git = "https://github.com/paritytech/substrate", branch = "master" }
+sc-basic-authorship = { git = "https://github.com/paritytech/substrate", branch = "master" }
+substrate-frame-rpc-system = { git = "https://github.com/paritytech/substrate", branch = "master" }
+pallet-transaction-payment-rpc = { git = "https://github.com/paritytech/substrate", branch = "master" }
+
+# These dependencies are used for runtime benchmarking
+frame-benchmarking = { git = "https://github.com/paritytech/substrate", branch = "master" }
+frame-benchmarking-cli = { git = "https://github.com/paritytech/substrate", branch = "master" }
+
+# Local Dependencies
+node-template-runtime = { path = "../runtime" }
+
+# CLI-specific dependencies
+try-runtime-cli = { git = "https://github.com/paritytech/substrate", branch = "master", optional = true }
+
+[build-dependencies]
+substrate-build-script-utils = { git = "https://github.com/paritytech/substrate", branch = "master" }
+
+[features]
+default = []
+# Dependencies that are only required if runtime benchmarking should be build.
+runtime-benchmarks = [
+	"frame-benchmarking/runtime-benchmarks",
+	"frame-benchmarking-cli/runtime-benchmarks",
+	"node-template-runtime/runtime-benchmarks",
+]
+# Enable features that allow the runtime to be tried and debugged. Name might be subject to change
+# in the near future.
+try-runtime = [
+	"try-runtime-cli/try-runtime",
+	"node-template-runtime/try-runtime",
+]
