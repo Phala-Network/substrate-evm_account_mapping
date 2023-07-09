@@ -143,11 +143,12 @@ pub mod pallet {
 			eip191_message.push_str(&hexed_call_data);
 
 			let message_hash = keccak_256(eip191_message.as_bytes());
-			let Some(recovered_public_key) = Self::ecdsa_recover_public_key(&signature, &message_hash) else {
+			let Some(recovered_key) = Self::ecdsa_recover_public_key(&signature, &message_hash) else {
 				return Err(Error::<T>::InvalidSignature.into())
 			};
-			let public_key = recovered_public_key.serialize();
-			let recovered_eth_address: [u8; 20] = keccak_256(&recovered_public_key.serialize_uncompressed()[1..])[12..].try_into().or(Err(Error::<T>::Unexpected))?;
+
+			let public_key = recovered_key.to_encoded_point(true).to_bytes();
+			let recovered_eth_address: [u8; 20] = keccak_256(&recovered_key.to_encoded_point(false).as_bytes()[1..])[12..].try_into().or(Err(Error::<T>::Unexpected))?;
 			ensure!(recovered_eth_address == eth_address, Error::<T>::EthAddressMismatch);
 
 			let raw_account = blake2_256(&public_key);
@@ -168,19 +169,19 @@ pub mod pallet {
 	}
 
 	impl<T: Config> Pallet<T> {
-		pub(crate) fn ecdsa_recover_public_key(signature: &[u8; 65], message: &[u8; 32]) -> Option<secp256k1::PublicKey> {
-			use secp256k1::{
-				ecdsa::{RecoveryId, RecoverableSignature},
-				Message, Secp256k1,
-			};
+		pub(crate) fn ecdsa_recover_public_key(signature: &[u8], message: &[u8]) -> Option<k256::ecdsa::VerifyingKey> {
+			use k256::ecdsa::{RecoveryId, Signature, VerifyingKey};
 
-			let rid = RecoveryId::from_i32(
-				if signature[64] > 26 { signature[64] - 27 } else { signature[64] } as i32
+			let rid = RecoveryId::try_from(
+				if signature[64] > 26 { signature[64] - 27 } else { signature[64] }
 			).ok()?;
-			let sig = RecoverableSignature::from_compact(&signature[..64], rid).ok()?;
-			let message = Message::from_slice(message).ok()?;
+			let sig = Signature::from_slice(&signature[..64]).ok()?;
 
-			Secp256k1::verification_only().recover_ecdsa(&message, &sig).ok()
+			VerifyingKey::recover_from_prehash(
+				message,
+				&sig,
+				rid
+			).ok()
 		}
 	}
 }

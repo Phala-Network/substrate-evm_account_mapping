@@ -23,7 +23,7 @@ frame-system = { git = "https://github.com/paritytech/substrate", branch = "mast
 
 hex = { version = "0.4", default-features = false, features = ["alloc"] }
 log = { version = "0.4.18", default-features = false }
-secp256k1 = { version = "0.24.0", default-features = false, features = ["recovery", "alloc"] } # TODO: use k256 instead
+k256 = { version = "0.13.1", default-features = false, features = ["alloc", "ecdsa"] }
 
 [dev-dependencies]
 sp-core = { git = "https://github.com/paritytech/substrate", branch = "master" }
@@ -39,7 +39,7 @@ std = [
 	"frame-support/std",
 	"frame-system/std",
 	"log/std",
-	"secp256k1/std",
+	"k256/std",
 ]
 runtime-benchmarks = [
 	"frame-benchmarking/runtime-benchmarks",
