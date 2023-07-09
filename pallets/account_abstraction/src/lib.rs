@@ -68,7 +68,7 @@ pub mod pallet {
 	#[pallet::generate_deposit(pub(super) fn deposit_event)]
 	pub enum Event<T: Config> {
 		/// A call just took place. \[result\]
-		CallDone { call_result: DispatchResult },
+		CallDone { who: T::AccountId, call_result: DispatchResult },
 	}
 
 	// Errors inform users that something went wrong.
@@ -76,9 +76,13 @@ pub mod pallet {
 	pub enum Error<T> {
 		Unexpected,
 		InvalidSignature,
-		EthAddressMismatch,
+		AccountMismatch,
 		DecodeError,
+		NonceError,
 	}
+
+	#[pallet::storage]
+	pub(crate) type AccountNonce<T: Config> = StorageMap<_, Blake2_128Concat, T::AccountId, u64, ValueQuery>;
 
 	#[pallet::validate_unsigned]
 	impl<T: Config> ValidateUnsigned for Pallet<T> {
@@ -124,8 +128,9 @@ pub mod pallet {
 		#[pallet::weight({0})]
 		pub fn remote_call_from_evm_chain(
 			origin: OriginFor<T>,
-			eth_address: [u8; 20],
+			account: T::AccountId,
 			call_data: BoundedVec<u8, ConstU32<2048>>,
+			nonce: u64,
 			signature: [u8; 65]
 		) -> DispatchResultWithPostInfo {
 			use alloc::string::{String, ToString};
@@ -134,11 +139,17 @@ pub mod pallet {
 			// This is an unsigned transaction
 			ensure_none(origin)?;
 
+			let current_nonce = AccountNonce::<T>::get(&account);
+			ensure!(current_nonce == nonce, Error::<T>::NonceError);
+
 			let hexed_call_data = hex::encode(&call_data);
-			let hexed_call_data_len_string = ((hexed_call_data.len() + 2) as u32).to_string();
+
+			let hexed_call_data_len = hexed_call_data.len() + 2;
+			let nonce_len = nonce.to_string().len();
 
 			let mut eip191_message = String::from("\x19Ethereum Signed Message:\n");
-			eip191_message.push_str(&hexed_call_data_len_string);
+			eip191_message.push_str(&(hexed_call_data_len + nonce_len).to_string());
+			eip191_message.push_str(&nonce.to_string());
 			eip191_message.push_str("0x");
 			eip191_message.push_str(&hexed_call_data);
 
@@ -146,22 +157,27 @@ pub mod pallet {
 			let Some(recovered_key) = Self::ecdsa_recover_public_key(&signature, &message_hash) else {
 				return Err(Error::<T>::InvalidSignature.into())
 			};
-
 			let public_key = recovered_key.to_encoded_point(true).to_bytes();
-			let recovered_eth_address: [u8; 20] = keccak_256(&recovered_key.to_encoded_point(false).as_bytes()[1..])[12..].try_into().or(Err(Error::<T>::Unexpected))?;
-			ensure!(recovered_eth_address == eth_address, Error::<T>::EthAddressMismatch);
 
-			let raw_account = blake2_256(&public_key);
-			let account = T::AccountId::decode(&mut &raw_account[..]).unwrap();
+			// let raw_account = blake2_256(&public_key);
+			let decoded_account = T::AccountId::decode(&mut &blake2_256(&public_key)[..]).unwrap();
+			ensure!(
+				decoded_account == account,
+				Error::<T>::AccountMismatch
+			);
+
 			let call = <T as Config>::RuntimeCall::decode(&mut TrailingZeroInput::new(&call_data)).or(Err(Error::<T>::DecodeError))?;
 
-			let mut origin: T::RuntimeOrigin = RawOrigin::Signed(account).into();
+			let mut origin: T::RuntimeOrigin = RawOrigin::Signed(account.clone()).into();
 			origin.add_filter(T::CallFilter::contains);
 			let res = call.dispatch(origin);
 
 			Self::deposit_event(Event::CallDone {
+				who: account.clone(),
 				call_result: res.map(|_| ()).map_err(|e| e.error),
 			});
+
+			AccountNonce::<T>::insert(&account, current_nonce + 1);
 
 			// TODO: need calculate the fee
 			Ok(Pays::No.into())

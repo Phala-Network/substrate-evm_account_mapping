@@ -1,22 +1,25 @@
 #[allow(unused)]
 use crate::{mock::*, Error, Event};
 use frame_support::{assert_noop, assert_ok};
+use sp_core::crypto::Ss58Codec;
 
 #[test]
 fn it_works() {
 	new_test_ext().execute_with(|| {
 		run_to_block(1);
 
-		let eth_address: [u8; 20] = hex::decode("e66bBB2B28273f4f0307e4c48fa30e304203016c").expect("Decodable").try_into().expect("Valid");
+		let account = AccountId::from_ss58check("5DT96geTS2iLpkH8fAhYAAphNpxddKCV36s5ShVFavf1xQiF").unwrap();
 		let call_data = hex::decode("00071448656c6c6f").expect("Valid");
-		let signature: [u8; 65] = hex::decode("ae6551cc19082ffa89c8c54b39282f00d214e477282ddea81b02908c78f08afc2c08474425f34ba54040a9eae1a592e3e3e60ee52b4ec88529b99ac29046f93b1c").expect("Decodable").try_into().expect("Valid");
+		let nonce: u64 = 0;
+		let signature: [u8; 65] = hex::decode("8fe82b58127bdaf5090c00375181fb4152ec28af422e371d73a05b776c22f4e70aaa24e2d7604b65cfaf2fe332e6763c9cbafb59c1be7f4a0fd8cae1f3e351fb1b").expect("Decodable").try_into().expect("Valid");
 
 		// Dispatch a signed extrinsic.
 		assert_ok!(
 			AccountAbstraction::remote_call_from_evm_chain(
 				RuntimeOrigin::none(),
-				eth_address,
+				account,
 				call_data.try_into().expect("Valid"),
+				nonce,
 				signature
 			)
 		);
@@ -29,11 +32,10 @@ fn it_works() {
 // #[test]
 // fn foo() {
 // 	use k256::ecdsa::{RecoveryId, Signature, VerifyingKey};
-// 	use sha3::{Keccak256, Digest};
 //
 // 	let eth_address: [u8; 20] = hex::decode("e66bBB2B28273f4f0307e4c48fa30e304203016c").expect("Decodable").try_into().expect("Valid");
-// 	let call_data = "0x00071448656c6c6f";
-// 	let signature: [u8; 65] = hex::decode("ae6551cc19082ffa89c8c54b39282f00d214e477282ddea81b02908c78f08afc2c08474425f34ba54040a9eae1a592e3e3e60ee52b4ec88529b99ac29046f93b1c").expect("Decodable").try_into().expect("Valid");
+// 	let call_data = "00x00071448656c6c6f";
+// 	let signature: [u8; 65] = hex::decode("8fe82b58127bdaf5090c00375181fb4152ec28af422e371d73a05b776c22f4e70aaa24e2d7604b65cfaf2fe332e6763c9cbafb59c1be7f4a0fd8cae1f3e351fb1b").expect("Decodable").try_into().expect("Valid");
 //
 // 	let eip191_message = format!("\x19Ethereum Signed Message:\n{}{}", call_data.len(), call_data);
 // 	let message_hash = sp_core::keccak_256(eip191_message.as_bytes());
