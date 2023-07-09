@@ -32,6 +32,7 @@ macro_rules! log {
 use frame_support::{
 	dispatch::{Dispatchable, PostDispatchInfo, GetDispatchInfo, RawOrigin},
 	traits::{Contains, OriginTrait},
+	weights::{Weight, WeightMeter},
 };
 use sp_runtime::traits::TrailingZeroInput;
 
@@ -79,6 +80,7 @@ pub mod pallet {
 		AccountMismatch,
 		DecodeError,
 		NonceError,
+		Overweight,
 	}
 
 	#[pallet::storage]
@@ -167,15 +169,15 @@ pub mod pallet {
 			);
 
 			let call = <T as Config>::RuntimeCall::decode(&mut TrailingZeroInput::new(&call_data)).or(Err(Error::<T>::DecodeError))?;
-
+			let mut weight_counter = WeightMeter::max_limit();
 			let mut origin: T::RuntimeOrigin = RawOrigin::Signed(account.clone()).into();
 			origin.add_filter(T::CallFilter::contains);
-			let res = call.dispatch(origin);
-
+			let call_result = Self::execute_dispatch(&mut weight_counter, origin, call);
 			Self::deposit_event(Event::CallDone {
 				who: account.clone(),
-				call_result: res.map(|_| ()).map_err(|e| e.error),
+				call_result,
 			});
+			// TODO: deposit `weight_counter.consumed` from some where
 
 			AccountNonce::<T>::insert(&account, current_nonce + 1);
 
@@ -198,6 +200,40 @@ pub mod pallet {
 				&sig,
 				rid
 			).ok()
+		}
+
+		/// Make a dispatch to the given `call` from the given `origin`, ensuring that the `weight`
+		/// counter does not exceed its limit and that it is counted accurately (e.g. accounted using
+		/// post info if available).
+		///
+		/// NOTE: Only the weight for this function will be counted (origin lookup, dispatch and the
+		/// call itself).
+		///
+		/// Cheat from pallet-scheduler
+		pub(crate) fn execute_dispatch(
+			weight: &mut WeightMeter,
+			origin: T::RuntimeOrigin,
+			call: <T as Config>::RuntimeCall,
+		) -> DispatchResult {
+			let base_weight = Weight::zero();
+			let call_weight = call.get_dispatch_info().weight;
+			// We only allow a scheduled call if it cannot push the weight past the limit.
+			let max_weight = base_weight.saturating_add(call_weight);
+
+			if !weight.can_accrue(max_weight) {
+				return Err(Error::<T>::Overweight.into())
+			}
+
+			let (maybe_actual_call_weight, result) = match call.dispatch(origin) {
+				Ok(post_info) => (post_info.actual_weight, Ok(())),
+				Err(error_and_info) =>
+					(error_and_info.post_info.actual_weight, Err(error_and_info.error)),
+			};
+			let call_weight = maybe_actual_call_weight.unwrap_or(call_weight);
+			weight.check_accrue(base_weight);
+			weight.check_accrue(call_weight);
+
+			result.map(|_| ())
 		}
 	}
 }
