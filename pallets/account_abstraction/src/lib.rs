@@ -31,16 +31,18 @@ macro_rules! log {
 
 use frame_support::{
 	dispatch::{Dispatchable, PostDispatchInfo, GetDispatchInfo, RawOrigin},
-	traits::{Contains, OriginTrait},
+	traits::{tokens::Balance, Contains, OriginTrait},
 	weights::{Weight, WeightMeter},
 };
-use sp_runtime::traits::TrailingZeroInput;
+use sp_runtime::traits::{Convert, TrailingZeroInput};
 
 #[frame_support::pallet]
 pub mod pallet {
 	use super::*;
 	use frame_support::pallet_prelude::*;
 	use frame_system::pallet_prelude::*;
+
+	use frame_support::traits::fungible::{Inspect as InspectFungible, Mutate as MutateFungible};
 
 	#[pallet::pallet]
 	pub struct Pallet<T>(_);
@@ -55,9 +57,19 @@ pub mod pallet {
 		type RuntimeCall: Dispatchable<RuntimeOrigin = Self::RuntimeOrigin, PostInfo = PostDispatchInfo>
 			+ GetDispatchInfo
 			+ codec::Decode
+			+ codec::Encode
+			+ scale_info::TypeInfo
 			+ IsType<<Self as frame_system::Config>::RuntimeCall>;
 
 		type CallFilter: Contains<<Self as frame_system::Config>::RuntimeCall>;
+
+		/// Currency type that this works on.
+		type Currency: InspectFungible<Self::AccountId, Balance = Self::Balance> + MutateFungible<Self::AccountId>;
+
+		/// The `Currency::Balance` type of the native currency.
+		type Balance: Balance;
+
+		type WeightPrice: Convert<Weight, Self::Balance>;
 
 		/// Type representing the weight of this pallet
 		type WeightInfo: WeightInfo;
@@ -78,6 +90,7 @@ pub mod pallet {
 		Unexpected,
 		InvalidSignature,
 		AccountMismatch,
+		EncodeError,
 		DecodeError,
 		NonceError,
 		Overweight,
@@ -220,7 +233,7 @@ pub mod pallet {
 			// We only allow a scheduled call if it cannot push the weight past the limit.
 			let max_weight = base_weight.saturating_add(call_weight);
 
-			if !weight.can_accrue(max_weight) {
+			if !weight.can_consume(max_weight) {
 				return Err(Error::<T>::Overweight.into())
 			}
 
@@ -230,8 +243,9 @@ pub mod pallet {
 					(error_and_info.post_info.actual_weight, Err(error_and_info.error)),
 			};
 			let call_weight = maybe_actual_call_weight.unwrap_or(call_weight);
-			weight.check_accrue(base_weight);
-			weight.check_accrue(call_weight);
+			let _ = weight.try_consume(base_weight);
+			let _ = weight.try_consume(call_weight);
+			let fee = T::WeightPrice::convert(call_weight);
 
 			result.map(|_| ())
 		}
