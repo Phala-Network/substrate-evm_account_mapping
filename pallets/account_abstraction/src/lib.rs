@@ -30,15 +30,18 @@ macro_rules! log {
 }
 
 use frame_support::{
-	dispatch::{Dispatchable, PostDispatchInfo, GetDispatchInfo, RawOrigin},
+	dispatch::{Dispatchable, DispatchInfo, PostDispatchInfo, GetDispatchInfo, RawOrigin},
 	traits::{tokens::Balance, Contains, OriginTrait},
 	weights::{Weight, WeightMeter},
 };
 use sp_runtime::traits::{Convert, TrailingZeroInput};
+use sp_runtime::DispatchResultWithInfo;
+use sp_runtime::FixedPointOperand;
+use sp_runtime::traits::Zero;
 use pallet_transaction_payment::ChargeTransactionPayment;
+use pallet_transaction_payment::OnChargeTransaction;
 
 type BalanceOf<T> = <<T as pallet_transaction_payment::Config>::OnChargeTransaction as pallet_transaction_payment::OnChargeTransaction<T>>::Balance;
-
 
 #[frame_support::pallet]
 pub mod pallet {
@@ -58,7 +61,7 @@ pub mod pallet {
 
 		/// The overarching call type.
 		type RuntimeCall: Parameter
-		+ Dispatchable<RuntimeOrigin = Self::RuntimeOrigin, PostInfo = PostDispatchInfo>
+		+ Dispatchable<RuntimeOrigin = Self::RuntimeOrigin, Info = DispatchInfo, PostInfo = PostDispatchInfo>
 		+ GetDispatchInfo
 		+ codec::Decode
 		+ codec::Encode
@@ -105,7 +108,7 @@ pub mod pallet {
 		/// here we make sure that some particular calls (the ones produced by offchain worker)
 		/// are being whitelisted and marked as valid.
 		fn validate_unsigned(_source: TransactionSource, call: &Self::Call) -> TransactionValidity {
-			if let Call::remote_call_from_evm_chain2 {
+			if let Call::remote_call_from_evm_chain {
 				ref account,
 				ref call,
 				ref nonce,
@@ -149,66 +152,6 @@ pub mod pallet {
 		pub fn remote_call_from_evm_chain(
 			origin: OriginFor<T>,
 			account: T::AccountId,
-			call_data: BoundedVec<u8, ConstU32<2048>>,
-			nonce: u64,
-			signature: [u8; 65]
-		) -> DispatchResultWithPostInfo {
-			use alloc::string::{String, ToString};
-			use sp_io::hashing::{blake2_256, keccak_256};
-
-			// This is an unsigned transaction
-			ensure_none(origin)?;
-
-			let current_nonce = AccountNonce::<T>::get(&account);
-			ensure!(current_nonce == nonce, Error::<T>::NonceError);
-
-			let hexed_call_data = hex::encode(&call_data);
-
-			let hexed_call_data_len = hexed_call_data.len() + 2;
-			let nonce_len = nonce.to_string().len();
-
-			let mut eip191_message = String::from("\x19Ethereum Signed Message:\n");
-			eip191_message.push_str(&(hexed_call_data_len + nonce_len).to_string());
-			eip191_message.push_str(&nonce.to_string());
-			eip191_message.push_str("0x");
-			eip191_message.push_str(&hexed_call_data);
-
-			let message_hash = keccak_256(eip191_message.as_bytes());
-			let Some(recovered_key) = Self::ecdsa_recover_public_key(&signature, &message_hash) else {
-				return Err(Error::<T>::InvalidSignature.into())
-			};
-			let public_key = recovered_key.to_encoded_point(true).to_bytes();
-
-			// let raw_account = blake2_256(&public_key);
-			let decoded_account = T::AccountId::decode(&mut &blake2_256(&public_key)[..]).unwrap();
-			ensure!(
-				decoded_account == account,
-				Error::<T>::AccountMismatch
-			);
-
-			let call = <T as Config>::RuntimeCall::decode(&mut TrailingZeroInput::new(&call_data)).or(Err(Error::<T>::DecodeError))?;
-			let mut weight_counter = WeightMeter::max_limit();
-			let mut origin: T::RuntimeOrigin = RawOrigin::Signed(account.clone()).into();
-			origin.add_filter(T::CallFilter::contains);
-			let call_result = Self::execute_dispatch(&mut weight_counter, origin, call);
-			Self::deposit_event(Event::CallDone {
-				who: account.clone(),
-				call_result,
-			});
-			// TODO: deposit `weight_counter.consumed` from some where
-
-			AccountNonce::<T>::insert(&account, current_nonce + 1);
-
-			// TODO: need calculate the fee
-			Ok(Pays::No.into())
-		}
-
-		/// Meta-transaction from EVM compatible chains
-		#[pallet::call_index(1)]
-		#[pallet::weight({0})]
-		pub fn remote_call_from_evm_chain2(
-			origin: OriginFor<T>,
-			account: T::AccountId,
 			call: Box<<T as Config>::RuntimeCall>,
 			nonce: u64,
 			signature: [u8; 65]
@@ -247,16 +190,36 @@ pub mod pallet {
 				Error::<T>::AccountMismatch
 			);
 
-			let call = <T as Config>::RuntimeCall::decode(&mut TrailingZeroInput::new(&call_data)).or(Err(Error::<T>::DecodeError))?;
 			let mut weight_counter = WeightMeter::max_limit();
 			let mut origin: T::RuntimeOrigin = RawOrigin::Signed(account.clone()).into();
 			origin.add_filter(T::CallFilter::contains);
 			let call_result = Self::execute_dispatch(&mut weight_counter, origin, call);
-			Self::deposit_event(Event::CallDone {
-				who: account.clone(),
-				call_result,
-			});
+			// Self::deposit_event(Event::CallDone {
+			// 	who: account.clone(),
+			// 	call_result,
+			// });
 			// TODO: deposit `weight_counter.consumed` from some where
+
+			// <T as pallet_transaction_payment::Config>::OnChargeTransaction::withdraw_fee(
+			// 	&account,
+			// 	&call,
+			// 	&call_result.ok().unwrap(),
+			// 	fee: Self::Balance,
+			// 	tip: Self::Balance,
+			// )?;
+
+			let post_dispatch_info = call_result.ok().unwrap();
+			let dispatch_info = DispatchInfo {
+				weight: post_dispatch_info.actual_weight.unwrap(),
+				class: DispatchClass::Normal,
+				pays_fee: post_dispatch_info.pays_fee,
+			};
+
+			pallet_transaction_payment::Pallet::<T>::compute_fee(
+				0u32,
+				&dispatch_info,
+				0.into()
+			);
 
 			AccountNonce::<T>::insert(&account, current_nonce + 1);
 
@@ -292,8 +255,8 @@ pub mod pallet {
 		pub(crate) fn execute_dispatch(
 			weight: &mut WeightMeter,
 			origin: T::RuntimeOrigin,
-			call: <T as Config>::RuntimeCall,
-		) -> DispatchResult {
+			call: Box<<T as Config>::RuntimeCall>
+		) -> DispatchResultWithInfo<PostDispatchInfo> {
 			let base_weight = Weight::zero();
 			let call_weight = call.get_dispatch_info().weight;
 			// We only allow a scheduled call if it cannot push the weight past the limit.
@@ -303,16 +266,7 @@ pub mod pallet {
 				return Err(Error::<T>::Overweight.into())
 			}
 
-			let (maybe_actual_call_weight, result) = match call.dispatch(origin) {
-				Ok(post_info) => (post_info.actual_weight, Ok(())),
-				Err(error_and_info) =>
-					(error_and_info.post_info.actual_weight, Err(error_and_info.error)),
-			};
-			let call_weight = maybe_actual_call_weight.unwrap_or(call_weight);
-			let _ = weight.try_consume(base_weight);
-			let _ = weight.try_consume(call_weight);
-
-			result.map(|_| ())
+			call.dispatch(origin)
 		}
 	}
 }

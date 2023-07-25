@@ -18,7 +18,7 @@ fn it_works() {
 
 		// Dispatch a signed extrinsic.
 		assert_ok!(
-			AccountAbstraction::remote_call_from_evm_chain2(
+			AccountAbstraction::remote_call_from_evm_chain(
 				RuntimeOrigin::none(),
 				account,
 				Box::<RuntimeCall>::new(call),
