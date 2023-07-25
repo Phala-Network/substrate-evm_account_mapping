@@ -1,14 +1,17 @@
 use crate as pallet_account_abstraction;
 use frame_support::{
-	traits::{ConstU16, ConstU32, ConstU64, ConstU128},
-	weights::Weight,
+	dispatch::DispatchClass,
+	parameter_types,
+	traits::{
+		ConstU16, ConstU32, ConstU64, ConstU128,
+		Get, Imbalance, OnUnbalanced,
+	},
+	weights::{Weight, WeightToFee as WeightToFeeT},
 };
 use sp_core::H256;
-use sp_runtime::{
-	traits::{BlakeTwo256, Convert, IdentifyAccount, IdentityLookup, Verify},
-	BuildStorage, MultiSignature,
-};
+use sp_runtime::{traits::{BlakeTwo256, IdentifyAccount, IdentityLookup, Verify}, BuildStorage, MultiSignature, SaturatedConversion};
 use sp_api_hidden_includes_construct_runtime::hidden_include::traits::Hooks;
+use pallet_transaction_payment::CurrencyAdapter;
 
 type Block = frame_system::mocking::MockBlock<Test>;
 
@@ -21,14 +24,40 @@ frame_support::construct_runtime!(
 	pub struct Test {
 		System: frame_system,
 		Balances: pallet_balances,
+		TransactionPayment: pallet_transaction_payment,
 		AccountAbstraction: pallet_account_abstraction,
 	}
 );
 
+parameter_types! {
+	pub(crate) static ExtrinsicBaseWeight: Weight = Weight::zero();
+}
+
+pub struct BlockWeights;
+impl Get<frame_system::limits::BlockWeights> for BlockWeights {
+	fn get() -> frame_system::limits::BlockWeights {
+		frame_system::limits::BlockWeights::builder()
+			.base_block(Weight::zero())
+			.for_class(DispatchClass::all(), |weights| {
+				weights.base_extrinsic = ExtrinsicBaseWeight::get().into();
+			})
+			.for_class(DispatchClass::non_mandatory(), |weights| {
+				weights.max_total = Weight::from_parts(1024, u64::MAX).into();
+			})
+			.build_or_panic()
+	}
+}
+
+parameter_types! {
+	pub static WeightToFee: u128 = 1;
+	pub static TransactionByteFee: u128 = 1;
+	pub static OperationalFeeMultiplier: u8 = 5;
+}
+
 impl frame_system::Config for Test {
 	type RuntimeEvent = RuntimeEvent;
 	type BaseCallFilter = frame_support::traits::Everything;
-	type BlockWeights = ();
+	type BlockWeights = BlockWeights;
 	type BlockLength = ();
 	type RuntimeOrigin = RuntimeOrigin;
 	type RuntimeCall = RuntimeCall;
@@ -52,35 +81,72 @@ impl frame_system::Config for Test {
 }
 
 impl pallet_balances::Config for Test {
+	type RuntimeEvent = RuntimeEvent;
+	type WeightInfo = ();
 	type Balance = u128;
 	type DustRemoval = ();
-	type RuntimeEvent = RuntimeEvent;
 	type ExistentialDeposit = ConstU128<100>;
 	type AccountStore = System;
-	type WeightInfo = ();
+	type ReserveIdentifier = [u8; 8];
+	type RuntimeHoldReason = ();
+	type FreezeIdentifier = ();
 	type MaxLocks = ();
 	type MaxReserves = ConstU32<50>;
-	type ReserveIdentifier = [u8; 8];
-	type FreezeIdentifier = ();
-	type MaxFreezes = ();
-	type RuntimeHoldReason = ();
 	type MaxHolds = ();
+	type MaxFreezes = ();
+}
+
+impl WeightToFeeT for WeightToFee {
+	type Balance = u128;
+
+	fn weight_to_fee(weight: &Weight) -> Self::Balance {
+		Self::Balance::saturated_from(weight.ref_time())
+			.saturating_mul(WEIGHT_TO_FEE.with(|v| *v.borrow()))
+	}
+}
+
+impl WeightToFeeT for TransactionByteFee {
+	type Balance = u128;
+
+	fn weight_to_fee(weight: &Weight) -> Self::Balance {
+		Self::Balance::saturated_from(weight.ref_time())
+			.saturating_mul(TRANSACTION_BYTE_FEE.with(|v| *v.borrow()))
+	}
+}
+
+parameter_types! {
+	pub(crate) static TipUnbalancedAmount: u128 = 0;
+	pub(crate) static FeeUnbalancedAmount: u128 = 0;
+}
+
+pub struct DealWithFees;
+impl OnUnbalanced<pallet_balances::NegativeImbalance<Test>> for DealWithFees {
+	fn on_unbalanceds<B>(
+		mut fees_then_tips: impl Iterator<Item = pallet_balances::NegativeImbalance<Test>>,
+	) {
+		if let Some(fees) = fees_then_tips.next() {
+			FeeUnbalancedAmount::mutate(|a| *a += fees.peek());
+			if let Some(tips) = fees_then_tips.next() {
+				TipUnbalancedAmount::mutate(|a| *a += tips.peek());
+			}
+		}
+	}
+}
+
+impl pallet_transaction_payment::Config for Test {
+	type RuntimeEvent = RuntimeEvent;
+	type OnChargeTransaction = CurrencyAdapter<Balances, DealWithFees>;
+	type OperationalFeeMultiplier = OperationalFeeMultiplier;
+	type WeightToFee = WeightToFee;
+	type LengthToFee = TransactionByteFee;
+	type FeeMultiplierUpdate = ();
 }
 
 impl pallet_account_abstraction::Config for Test {
 	type RuntimeEvent = RuntimeEvent;
 	type RuntimeCall = RuntimeCall;
 	type CallFilter = frame_support::traits::Everything;
-	type Balance = u128;
-	type Currency = Balances;
-	type WeightPrice = Self;
 	type WeightInfo = ();
-}
-
-impl Convert<Weight, u128> for Test {
-	fn convert(w: Weight) -> u128 {
-		w.ref_time().into()
-	}
 }
 
 // Build genesis storage according to the mock runtime.

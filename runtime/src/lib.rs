@@ -13,7 +13,7 @@ use sp_core::{crypto::KeyTypeId, OpaqueMetadata};
 use sp_runtime::{
 	create_runtime_str, generic, impl_opaque_keys,
 	traits::{
-		AccountIdLookup, BlakeTwo256, Block as BlockT, Convert, IdentifyAccount, NumberFor, One, Verify,
+		AccountIdLookup, BlakeTwo256, Block as BlockT, IdentifyAccount, NumberFor, One, Verify,
 	},
 	transaction_validity::{TransactionSource, TransactionValidity},
 	ApplyExtrinsicResult, MultiSignature,
@@ -269,17 +269,8 @@ impl pallet_sudo::Config for Runtime {
 impl pallet_account_abstraction::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type RuntimeCall = RuntimeCall;
-	type Balance = u128;
-	type Currency = Balances;
-	type WeightPrice = Self;
 	type CallFilter = frame_support::traits::Everything;
 	type WeightInfo = ();
-}
-
-impl Convert<Weight, u128> for Runtime {
-	fn convert(w: Weight) -> u128 {
-		w.ref_time().into()
-	}
 }
 
 // Create the runtime by composing the FRAME pallets that were previously configured.

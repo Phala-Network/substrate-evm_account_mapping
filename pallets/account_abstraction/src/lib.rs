@@ -13,7 +13,7 @@ mod tests;
 #[cfg(feature = "runtime-benchmarks")]
 mod benchmarking;
 pub mod weights;
-pub use weights::*;
+pub use weights::WeightInfo;
 
 /// The log target of this pallet.
 pub const LOG_TARGET: &str = "runtime::account_abstraction";
@@ -35,41 +35,37 @@ use frame_support::{
 	weights::{Weight, WeightMeter},
 };
 use sp_runtime::traits::{Convert, TrailingZeroInput};
+use pallet_transaction_payment::ChargeTransactionPayment;
+
+type BalanceOf<T> = <<T as pallet_transaction_payment::Config>::OnChargeTransaction as pallet_transaction_payment::OnChargeTransaction<T>>::Balance;
+
 
 #[frame_support::pallet]
 pub mod pallet {
 	use super::*;
 	use frame_support::pallet_prelude::*;
 	use frame_system::pallet_prelude::*;
-
-	use frame_support::traits::fungible::{Inspect as InspectFungible, Mutate as MutateFungible};
+	use sp_std::prelude::*;
 
 	#[pallet::pallet]
 	pub struct Pallet<T>(_);
 
 	/// Configure the pallet by specifying the parameters and types on which it depends.
 	#[pallet::config]
-	pub trait Config: frame_system::Config {
+	pub trait Config: frame_system::Config + pallet_transaction_payment::Config {
 		/// Because this pallet emits events, it depends on the runtime's definition of an event.
 		type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
 
 		/// The overarching call type.
-		type RuntimeCall: Dispatchable<RuntimeOrigin = Self::RuntimeOrigin, PostInfo = PostDispatchInfo>
-			+ GetDispatchInfo
-			+ codec::Decode
-			+ codec::Encode
-			+ scale_info::TypeInfo
-			+ IsType<<Self as frame_system::Config>::RuntimeCall>;
+		type RuntimeCall: Parameter
+		+ Dispatchable<RuntimeOrigin = Self::RuntimeOrigin, PostInfo = PostDispatchInfo>
+		+ GetDispatchInfo
+		+ codec::Decode
+		+ codec::Encode
+		+ scale_info::TypeInfo
+		+ IsType<<Self as frame_system::Config>::RuntimeCall>;
 
 		type CallFilter: Contains<<Self as frame_system::Config>::RuntimeCall>;
-
-		/// Currency type that this works on.
-		type Currency: InspectFungible<Self::AccountId, Balance = Self::Balance> + MutateFungible<Self::AccountId>;
-
-		/// The `Currency::Balance` type of the native currency.
-		type Balance: Balance;
-
-		type WeightPrice: Convert<Weight, Self::Balance>;
 
 		/// Type representing the weight of this pallet
 		type WeightInfo: WeightInfo;
@@ -108,7 +104,16 @@ pub mod pallet {
 		/// By default unsigned transactions are disallowed, but implementing the validator
 		/// here we make sure that some particular calls (the ones produced by offchain worker)
 		/// are being whitelisted and marked as valid.
-		fn validate_unsigned(_source: TransactionSource, _call: &Self::Call) -> TransactionValidity {
+		fn validate_unsigned(_source: TransactionSource, call: &Self::Call) -> TransactionValidity {
+			if let Call::remote_call_from_evm_chain2 {
+				ref account,
+				ref call,
+				ref nonce,
+				ref signature,
+			} = call {
+
+			}
+
 			ValidTransaction::with_tag_prefix("AccountAbstraction")
 				// We set base priority to 2**20 and hope it's included before any
 				// other transactions in the pool.
@@ -197,6 +202,67 @@ pub mod pallet {
 			// TODO: need calculate the fee
 			Ok(Pays::No.into())
 		}
+
+		/// Meta-transaction from EVM compatible chains
+		#[pallet::call_index(1)]
+		#[pallet::weight({0})]
+		pub fn remote_call_from_evm_chain2(
+			origin: OriginFor<T>,
+			account: T::AccountId,
+			call: Box<<T as Config>::RuntimeCall>,
+			nonce: u64,
+			signature: [u8; 65]
+		) -> DispatchResultWithPostInfo {
+			use alloc::string::{String, ToString};
+			use sp_io::hashing::{blake2_256, keccak_256};
+
+			// This is an unsigned transaction
+			ensure_none(origin)?;
+
+			let current_nonce = AccountNonce::<T>::get(&account);
+			ensure!(current_nonce == nonce, Error::<T>::NonceError);
+
+			let call_data = <T as Config>::RuntimeCall::encode(&call);
+			let hexed_call_data = hex::encode(&call_data);
+
+			let hexed_call_data_len = hexed_call_data.len() + 2;
+			let nonce_len = nonce.to_string().len();
+
+			let mut eip191_message = String::from("\x19Ethereum Signed Message:\n");
+			eip191_message.push_str(&(hexed_call_data_len + nonce_len).to_string());
+			eip191_message.push_str(&nonce.to_string());
+			eip191_message.push_str("0x");
+			eip191_message.push_str(&hexed_call_data);
+
+			let message_hash = keccak_256(eip191_message.as_bytes());
+			let Some(recovered_key) = Self::ecdsa_recover_public_key(&signature, &message_hash) else {
+				return Err(Error::<T>::InvalidSignature.into())
+			};
+			let public_key = recovered_key.to_encoded_point(true).to_bytes();
+
+			// let raw_account = blake2_256(&public_key);
+			let decoded_account = T::AccountId::decode(&mut &blake2_256(&public_key)[..]).unwrap();
+			ensure!(
+				decoded_account == account,
+				Error::<T>::AccountMismatch
+			);
+
+			let call = <T as Config>::RuntimeCall::decode(&mut TrailingZeroInput::new(&call_data)).or(Err(Error::<T>::DecodeError))?;
+			let mut weight_counter = WeightMeter::max_limit();
+			let mut origin: T::RuntimeOrigin = RawOrigin::Signed(account.clone()).into();
+			origin.add_filter(T::CallFilter::contains);
+			let call_result = Self::execute_dispatch(&mut weight_counter, origin, call);
+			Self::deposit_event(Event::CallDone {
+				who: account.clone(),
+				call_result,
+			});
+			// TODO: deposit `weight_counter.consumed` from some where
+
+			AccountNonce::<T>::insert(&account, current_nonce + 1);
+
+			// TODO: need calculate the fee
+			Ok(Pays::No.into())
+		}
 	}
 
 	impl<T: Config> Pallet<T> {
@@ -245,7 +311,6 @@ pub mod pallet {
 			let call_weight = maybe_actual_call_weight.unwrap_or(call_weight);
 			let _ = weight.try_consume(base_weight);
 			let _ = weight.try_consume(call_weight);
-			let fee = T::WeightPrice::convert(call_weight);
 
 			result.map(|_| ())
 		}
