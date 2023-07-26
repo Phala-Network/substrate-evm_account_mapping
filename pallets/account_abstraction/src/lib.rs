@@ -99,7 +99,10 @@ pub mod pallet {
 	pub(crate) type AccountNonce<T: Config> = StorageMap<_, Blake2_128Concat, T::AccountId, u64, ValueQuery>;
 
 	#[pallet::validate_unsigned]
-	impl<T: Config> ValidateUnsigned for Pallet<T> {
+	impl<T: Config> ValidateUnsigned for Pallet<T>
+	where
+		<T as frame_system::Config>::RuntimeCall: Dispatchable<Info = DispatchInfo>,
+	{
 		type Call = Call<T>;
 
 		/// Validate unsigned call to this module.
@@ -145,7 +148,10 @@ pub mod pallet {
 	}
 
 	#[pallet::call]
-	impl<T: Config> Pallet<T> {
+	impl<T: Config> Pallet<T>
+	where
+		<T as frame_system::Config>::RuntimeCall: Dispatchable<Info = DispatchInfo>,
+	{
 		/// Meta-transaction from EVM compatible chains
 		#[pallet::call_index(0)]
 		#[pallet::weight({0})]
@@ -218,7 +224,7 @@ pub mod pallet {
 			pallet_transaction_payment::Pallet::<T>::compute_fee(
 				0u32,
 				&dispatch_info,
-				0.into()
+				0u32.into()
 			);
 
 			AccountNonce::<T>::insert(&account, current_nonce + 1);
