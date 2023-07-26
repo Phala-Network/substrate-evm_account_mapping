@@ -101,6 +101,7 @@ pub mod pallet {
 	#[pallet::validate_unsigned]
 	impl<T: Config> ValidateUnsigned for Pallet<T>
 	where
+		BalanceOf<T>: FixedPointOperand,
 		<T as frame_system::Config>::RuntimeCall: Dispatchable<Info = DispatchInfo>,
 	{
 		type Call = Call<T>;
@@ -150,6 +151,7 @@ pub mod pallet {
 	#[pallet::call]
 	impl<T: Config> Pallet<T>
 	where
+		BalanceOf<T>: FixedPointOperand,
 		<T as frame_system::Config>::RuntimeCall: Dispatchable<Info = DispatchInfo>,
 	{
 		/// Meta-transaction from EVM compatible chains
