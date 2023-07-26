@@ -48,7 +48,7 @@ if (subAddress !== subAddressFromPublicKey) {
   Deno.exit(1)
 }
 
-const message = "00x00071448656c6c6f" // stringToHex("Hello world !!!")
+const message = "00x00071448656c6c6f" // system.remarkWithEvent("Hello")
 console.log(`Message: ${message}`)
 
 const hashedMessage = EthCrypto.hash.keccak256("\x19Ethereum Signed Message:\n" + message.length + message)

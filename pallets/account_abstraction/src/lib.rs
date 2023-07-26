@@ -31,17 +31,13 @@ macro_rules! log {
 
 use frame_support::{
 	dispatch::{Dispatchable, DispatchInfo, PostDispatchInfo, GetDispatchInfo, RawOrigin},
-	traits::{tokens::Balance, Contains, OriginTrait},
+	traits::{Contains, OriginTrait},
 	weights::{Weight, WeightMeter},
 };
-use sp_runtime::traits::{Convert, TrailingZeroInput};
-use sp_runtime::DispatchResultWithInfo;
 use sp_runtime::FixedPointOperand;
-use sp_runtime::traits::Zero;
-use pallet_transaction_payment::ChargeTransactionPayment;
 use pallet_transaction_payment::OnChargeTransaction;
 
-type BalanceOf<T> = <<T as pallet_transaction_payment::Config>::OnChargeTransaction as pallet_transaction_payment::OnChargeTransaction<T>>::Balance;
+type BalanceOf<T> = <<T as pallet_transaction_payment::Config>::OnChargeTransaction as OnChargeTransaction<T>>::Balance;
 
 #[frame_support::pallet]
 pub mod pallet {
@@ -112,14 +108,14 @@ pub mod pallet {
 		/// here we make sure that some particular calls (the ones produced by offchain worker)
 		/// are being whitelisted and marked as valid.
 		fn validate_unsigned(_source: TransactionSource, call: &Self::Call) -> TransactionValidity {
-			if let Call::remote_call_from_evm_chain {
-				ref account,
-				ref call,
-				ref nonce,
-				ref signature,
-			} = call {
-
-			}
+			// if let Call::remote_call_from_evm_chain {
+			// 	ref account,
+			// 	ref call,
+			// 	ref nonce,
+			// 	ref signature,
+			// } = call {
+			//
+			// }
 
 			ValidTransaction::with_tag_prefix("AccountAbstraction")
 				// We set base priority to 2**20 and hope it's included before any
@@ -191,7 +187,6 @@ pub mod pallet {
 			};
 			let public_key = recovered_key.to_encoded_point(true).to_bytes();
 
-			// let raw_account = blake2_256(&public_key);
 			let decoded_account = T::AccountId::decode(&mut &blake2_256(&public_key)[..]).unwrap();
 			ensure!(
 				decoded_account == account,
@@ -201,38 +196,39 @@ pub mod pallet {
 			let mut weight_counter = WeightMeter::max_limit();
 			let mut origin: T::RuntimeOrigin = RawOrigin::Signed(account.clone()).into();
 			origin.add_filter(T::CallFilter::contains);
-			let call_result = Self::execute_dispatch(&mut weight_counter, origin, call);
-			// Self::deposit_event(Event::CallDone {
-			// 	who: account.clone(),
-			// 	call_result,
-			// });
-			// TODO: deposit `weight_counter.consumed` from some where
+			let (actual_weight, call_result) = Self::execute_dispatch(&mut weight_counter, origin, call.clone())?;
+			Self::deposit_event(Event::CallDone {
+				who: account.clone(),
+				call_result,
+			});
 
-			// <T as pallet_transaction_payment::Config>::OnChargeTransaction::withdraw_fee(
-			// 	&account,
-			// 	&call,
-			// 	&call_result.ok().unwrap(),
-			// 	fee: Self::Balance,
-			// 	tip: Self::Balance,
-			// )?;
-
-			let post_dispatch_info = call_result.ok().unwrap();
+			// TODO: the gas of meta tx itself need pay as well
 			let dispatch_info = DispatchInfo {
-				weight: post_dispatch_info.actual_weight.unwrap(),
+				weight: actual_weight,
 				class: DispatchClass::Normal,
-				pays_fee: post_dispatch_info.pays_fee,
+				pays_fee: Pays::Yes,
 			};
 
-			pallet_transaction_payment::Pallet::<T>::compute_fee(
-				0u32,
+			let actual_fee = pallet_transaction_payment::Pallet::<T>::compute_fee(
+				call_data.len() as u32,
 				&dispatch_info,
 				0u32.into()
 			);
 
+			let _withdraw_result = <<T as pallet_transaction_payment::Config>::OnChargeTransaction as OnChargeTransaction<T>>::withdraw_fee(
+				&account, &(*call).into(), &dispatch_info, actual_fee, 0u32.into(),
+			);
+
+			// TODO: handle error
+
+			// Self::deposit_event(
+			// 	pallet_transaction_payment::Event::<T>::TransactionFeePaid { who: account, actual_fee, tip: 0u32.into() }
+			// );
+
 			AccountNonce::<T>::insert(&account, current_nonce + 1);
 
-			// TODO: need calculate the fee
-			Ok(Pays::No.into())
+			// TODO: need add the actual fee
+			Ok(Pays::Yes.into())
 		}
 	}
 
@@ -264,17 +260,25 @@ pub mod pallet {
 			weight: &mut WeightMeter,
 			origin: T::RuntimeOrigin,
 			call: Box<<T as Config>::RuntimeCall>
-		) -> DispatchResultWithInfo<PostDispatchInfo> {
+		) -> Result<(Weight, DispatchResult), Error<T>> {
 			let base_weight = Weight::zero();
 			let call_weight = call.get_dispatch_info().weight;
 			// We only allow a scheduled call if it cannot push the weight past the limit.
 			let max_weight = base_weight.saturating_add(call_weight);
 
 			if !weight.can_consume(max_weight) {
-				return Err(Error::<T>::Overweight.into())
+				return Err(Error::<T>::Overweight)
 			}
 
-			call.dispatch(origin)
+			let (maybe_actual_call_weight, result) = match call.dispatch(origin) {
+				Ok(post_info) => (post_info.actual_weight, Ok(())),
+				Err(error_and_info) =>
+					(error_and_info.post_info.actual_weight, Err(error_and_info.error)),
+			};
+			let call_weight = maybe_actual_call_weight.unwrap_or(call_weight);
+			let _ = weight.try_consume(base_weight);
+			let _ = weight.try_consume(call_weight);
+			Ok((call_weight, result))
 		}
 	}
 }
