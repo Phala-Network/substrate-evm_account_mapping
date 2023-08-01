@@ -36,6 +36,7 @@ use frame_support::{
 };
 use sp_runtime::FixedPointOperand;
 use pallet_transaction_payment::OnChargeTransaction;
+use sp_runtime::traits::TrailingZeroInput;
 
 type BalanceOf<T> = <<T as pallet_transaction_payment::Config>::OnChargeTransaction as OnChargeTransaction<T>>::Balance;
 
@@ -97,7 +98,7 @@ pub mod pallet {
 	#[pallet::validate_unsigned]
 	impl<T: Config> ValidateUnsigned for Pallet<T>
 	where
-		BalanceOf<T>: FixedPointOperand,
+		BalanceOf<T>: Send + Sync + FixedPointOperand,
 		<T as frame_system::Config>::RuntimeCall: Dispatchable<Info = DispatchInfo>,
 	{
 		type Call = Call<T>;
@@ -108,19 +109,108 @@ pub mod pallet {
 		/// here we make sure that some particular calls (the ones produced by offchain worker)
 		/// are being whitelisted and marked as valid.
 		fn validate_unsigned(_source: TransactionSource, call: &Self::Call) -> TransactionValidity {
-			// if let Call::remote_call_from_evm_chain {
-			// 	ref account,
-			// 	ref call,
-			// 	ref nonce,
-			// 	ref signature,
-			// } = call {
-			//
-			// }
+			// Only allow `remote_call_from_evm_chain`
+			let Call::remote_call_from_evm_chain {
+				ref who,
+				ref call_data,
+				ref nonce,
+				ref signature,
+			} = call else {
+				return Err(InvalidTransaction::Call.into())
+			};
+
+			// Check nonce
+			use sp_std::cmp::Ordering;
+			let current_nonce = AccountNonce::<T>::get(&who);
+			match nonce.cmp(&current_nonce) {
+				Ordering::Greater => {
+					return Err(InvalidTransaction::Future.into())
+				},
+				Ordering::Less => {
+					return Err(InvalidTransaction::Stale.into())
+				},
+				_ => {}
+			};
+
+			// Validate the signature
+			// TODO: Rewrite when implement EIP-712
+			use alloc::string::{String, ToString};
+			use sp_io::hashing::{blake2_256, keccak_256};
+
+			let hexed_call_data = hex::encode(&call_data);
+			let hexed_call_data_len = hexed_call_data.len() + 2;
+			let nonce_len = nonce.to_string().len();
+
+			let mut eip191_message = String::from("\x19Ethereum Signed Message:\n");
+			eip191_message.push_str(&(hexed_call_data_len + nonce_len).to_string());
+			eip191_message.push_str(&nonce.to_string());
+			eip191_message.push_str("0x");
+			eip191_message.push_str(&hexed_call_data);
+
+			let message_hash = keccak_256(eip191_message.as_bytes());
+			let Some(recovered_key) = Pallet::<T>::ecdsa_recover_public_key(signature, &message_hash) else {
+				return Err(InvalidTransaction::BadProof.into())
+			};
+
+			// Validate the caller
+			let public_key = recovered_key.to_encoded_point(true).to_bytes();
+			let decoded_account = T::AccountId::decode(&mut &blake2_256(&public_key)[..]).unwrap();
+			if who != &decoded_account {
+				return Err(InvalidTransaction::BadSigner.into())
+			}
+
+			// Deserialize the call
+			let actual_call = <T as Config>::RuntimeCall::decode(&mut TrailingZeroInput::new(call_data)).or(Err(InvalidTransaction::Call))?;
+
+			// Withdraw the est fee
+			// TODO: support tip
+			let tip = 0u32.saturated_into::<BalanceOf<T>>();
+			let len = actual_call.encoded_size();
+			let info = actual_call.get_dispatch_info();
+			// We shall get the same `fee` later
+			// TODO: We can't get the exact fee for `Call::remote_call_from_evm_chain`, perhaps we can hard code a service fee?
+			let est_fee = pallet_transaction_payment::Pallet::<T>::compute_fee(len as u32, &info, tip);
+			let _ =
+				<<T as pallet_transaction_payment::Config>::OnChargeTransaction as OnChargeTransaction<T>>::withdraw_fee(who, &actual_call.into(), &info, est_fee, tip)?;
+
+			// Calculate priority
+			use sp_runtime::{traits::One, Saturating, SaturatedConversion};
+			use frame_support::traits::Defensive;
+			// Calculate how many such extrinsics we could fit into an empty block and take the
+			// limiting factor.
+			let max_block_weight = <T as frame_system::Config>::BlockWeights::get().max_block;
+			let max_block_length = *<T as frame_system::Config>::BlockLength::get().max.get(info.class) as u64;
+
+			// bounded_weight is used as a divisor later so we keep it non-zero.
+			let bounded_weight = info.weight.max(Weight::from_parts(1, 1)).min(max_block_weight);
+			let bounded_length = (len as u64).clamp(1, max_block_length);
+
+			// returns the scarce resource, i.e. the one that is limiting the number of transactions.
+			let max_tx_per_block_weight = max_block_weight
+				.checked_div_per_component(&bounded_weight)
+				.defensive_proof("bounded_weight is non-zero; qed")
+				.unwrap_or(1);
+			let max_tx_per_block_length = max_block_length / bounded_length;
+			// Given our current knowledge this value is going to be in a reasonable range - i.e.
+			// less than 10^9 (2^30), so multiplying by the `tip` value is unlikely to overflow the
+			// balance type. We still use saturating ops obviously, but the point is to end up with some
+			// `priority` distribution instead of having all transactions saturate the priority.
+			let max_tx_per_block = max_tx_per_block_length
+				.min(max_tx_per_block_weight)
+				.saturated_into::<BalanceOf<T>>();
+			let max_reward = |val: BalanceOf<T>| val.saturating_mul(max_tx_per_block);
+
+			// To distribute no-tip transactions a little bit, we increase the tip value by one.
+			// This means that given two transactions without a tip, smaller one will be preferred.
+			let tip = tip.saturating_add(One::one());
+			let scaled_tip = max_reward(tip);
+
+			let priority = scaled_tip.saturated_into::<TransactionPriority>();
 
 			ValidTransaction::with_tag_prefix("AccountAbstraction")
 				// We set base priority to 2**20 and hope it's included before any
 				// other transactions in the pool.
-				.priority((1u64 << 20).into())
+				.priority(priority)
 				// This transaction does not require anything else to go before into
 				// the pool. In theory we could require `previous_unsigned_at`
 				// transaction to go first, but it's not necessary in our case.
@@ -130,7 +220,7 @@ pub mod pallet {
 				// and will end up in the block. We can still have multiple
 				// transactions compete for the same "spot", and the one with higher
 				// priority will replace other one in the pool.
-				.and_provides("my_tag")
+				.and_provides(signature)
 				// The transaction is only valid for next 5 blocks. After that it's
 				// going to be revalidated by the pool.
 				.longevity(5)
@@ -155,8 +245,8 @@ pub mod pallet {
 		#[pallet::weight({0})]
 		pub fn remote_call_from_evm_chain(
 			origin: OriginFor<T>,
-			account: T::AccountId,
-			call: Box<<T as Config>::RuntimeCall>,
+			who: T::AccountId,
+			call_data: BoundedVec<u8, ConstU32<2048>>,
 			nonce: u64,
 			signature: [u8; 65]
 		) -> DispatchResultWithPostInfo {
@@ -166,12 +256,10 @@ pub mod pallet {
 			// This is an unsigned transaction
 			ensure_none(origin)?;
 
-			let current_nonce = AccountNonce::<T>::get(&account);
+			let current_nonce = AccountNonce::<T>::get(&who);
 			ensure!(current_nonce == nonce, Error::<T>::NonceError);
 
-			let call_data = <T as Config>::RuntimeCall::encode(&call);
 			let hexed_call_data = hex::encode(&call_data);
-
 			let hexed_call_data_len = hexed_call_data.len() + 2;
 			let nonce_len = nonce.to_string().len();
 
@@ -189,16 +277,17 @@ pub mod pallet {
 
 			let decoded_account = T::AccountId::decode(&mut &blake2_256(&public_key)[..]).unwrap();
 			ensure!(
-				decoded_account == account,
+				decoded_account == who,
 				Error::<T>::AccountMismatch
 			);
 
+			let call = <T as Config>::RuntimeCall::decode(&mut TrailingZeroInput::new(&call_data)).or(Err(Error::<T>::DecodeError))?;
 			let mut weight_counter = WeightMeter::max_limit();
-			let mut origin: T::RuntimeOrigin = RawOrigin::Signed(account.clone()).into();
+			let mut origin: T::RuntimeOrigin = RawOrigin::Signed(who.clone()).into();
 			origin.add_filter(T::CallFilter::contains);
 			let (actual_weight, call_result) = Self::execute_dispatch(&mut weight_counter, origin, call.clone())?;
 			Self::deposit_event(Event::CallDone {
-				who: account.clone(),
+				who: who.clone(),
 				call_result,
 			});
 
@@ -215,17 +304,24 @@ pub mod pallet {
 				0u32.into()
 			);
 
-			let _withdraw_result = <<T as pallet_transaction_payment::Config>::OnChargeTransaction as OnChargeTransaction<T>>::withdraw_fee(
-				&account, &(*call).into(), &dispatch_info, actual_fee, 0u32.into(),
-			);
+
+
+			// let _withdraw_result = <<T as pallet_transaction_payment::Config>::OnChargeTransaction as OnChargeTransaction<T>>::withdraw_fee(
+			// 	&who, &call.into(), &dispatch_info, actual_fee, 0u32.into(),
+			// );
+
+			let len = call.encoded_size();
+			let info = call.get_dispatch_info();
+			let est_fee = pallet_transaction_payment::Pallet::<T>::compute_fee(len as u32, &info, 0u32.into());
+
+				// let actual_fee = Pallet::<T>::compute_actual_fee(len as u32, info, post_info, tip);
+			// T::OnChargeTransaction::correct_and_deposit_fee(
+			// 	&who, info, post_info, actual_fee, tip, imbalance,
+			// )?;
 
 			// TODO: handle error
 
-			// Self::deposit_event(
-			// 	pallet_transaction_payment::Event::<T>::TransactionFeePaid { who: account, actual_fee, tip: 0u32.into() }
-			// );
-
-			AccountNonce::<T>::insert(&account, current_nonce + 1);
+			AccountNonce::<T>::insert(&who, current_nonce + 1);
 
 			// TODO: need add the actual fee
 			Ok(Pays::Yes.into())
@@ -259,7 +355,7 @@ pub mod pallet {
 		pub(crate) fn execute_dispatch(
 			weight: &mut WeightMeter,
 			origin: T::RuntimeOrigin,
-			call: Box<<T as Config>::RuntimeCall>
+			call: <T as Config>::RuntimeCall
 		) -> Result<(Weight, DispatchResult), Error<T>> {
 			let base_weight = Weight::zero();
 			let call_weight = call.get_dispatch_info().weight;

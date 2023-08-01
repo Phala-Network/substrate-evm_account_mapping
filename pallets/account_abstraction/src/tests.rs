@@ -12,7 +12,7 @@ fn it_works() {
 
 		let account = AccountId::from_ss58check("5DT96geTS2iLpkH8fAhYAAphNpxddKCV36s5ShVFavf1xQiF").unwrap();
 		let call_data = hex::decode("00071448656c6c6f").expect("Valid");
-		let call = RuntimeCall::decode(&mut TrailingZeroInput::new(&call_data)).expect("Valid");
+		// let call = RuntimeCall::decode(&mut TrailingZeroInput::new(&call_data)).expect("Valid");
 		let nonce: u64 = 0;
 		let signature: [u8; 65] = hex::decode("8fe82b58127bdaf5090c00375181fb4152ec28af422e371d73a05b776c22f4e70aaa24e2d7604b65cfaf2fe332e6763c9cbafb59c1be7f4a0fd8cae1f3e351fb1b").expect("Decodable").try_into().expect("Valid");
 
@@ -22,7 +22,7 @@ fn it_works() {
 			AccountAbstraction::remote_call_from_evm_chain(
 				RuntimeOrigin::none(),
 				account,
-				Box::<RuntimeCall>::new(call),
+				call_data.try_into().expect("Valid"), // Box::<RuntimeCall>::new(call),
 				nonce,
 				signature
 			)
