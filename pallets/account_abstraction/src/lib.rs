@@ -102,11 +102,6 @@ pub mod pallet {
 	{
 		type Call = Call<T>;
 
-		/// Validate unsigned call to this module.
-		///
-		/// By default unsigned transactions are disallowed, but implementing the validator
-		/// here we make sure that some particular calls (the ones produced by offchain worker)
-		/// are being whitelisted and marked as valid.
 		fn validate_unsigned(_source: TransactionSource, call: &Self::Call) -> TransactionValidity {
 			// Only allow `remote_call_from_evm_chain`
 			let Call::remote_call_from_evm_chain {
@@ -173,6 +168,9 @@ pub mod pallet {
 			let _ =
 				<<T as pallet_transaction_payment::Config>::OnChargeTransaction as OnChargeTransaction<T>>::withdraw_fee(who, &actual_call.into(), &info, est_fee, tip)?;
 
+			// Update the nonce
+			AccountNonce::<T>::insert(&who, current_nonce + 1);
+
 			// Calculate priority
 			// Cheat from `get_priority` in frame/transaction-payment/src/lib.rs
 			use sp_runtime::{traits::One, Saturating, SaturatedConversion};
@@ -222,7 +220,7 @@ pub mod pallet {
 				// and will end up in the block. We can still have multiple
 				// transactions compete for the same "spot", and the one with higher
 				// priority will replace other one in the pool.
-				.and_provides(signature)
+				.and_provides((who, nonce).encode())
 				// The transaction is only valid for next 5 blocks. After that it's
 				// going to be revalidated by the pool.
 				.longevity(5)
@@ -318,9 +316,6 @@ pub mod pallet {
 			).map_err(|_err| Error::<T>::PaymentError)?;
 
 			// TODO: Deposit `Event::<T>::TransactionFeePaid { who, actual_fee, tip }` event
-
-			// Update the nonce
-			AccountNonce::<T>::insert(&who, current_nonce + 1);
 
 			// TODO: need add the actual fee
 			call_result
