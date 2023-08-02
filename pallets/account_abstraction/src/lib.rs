@@ -208,6 +208,7 @@ pub mod pallet {
 
 			let priority = scaled_tip.saturated_into::<TransactionPriority>();
 
+			// Finish the validation
 			ValidTransaction::with_tag_prefix("AccountAbstraction")
 				// We set base priority to 2**20 and hope it's included before any
 				// other transactions in the pool.
@@ -257,9 +258,11 @@ pub mod pallet {
 			// This is an unsigned transaction
 			ensure_none(origin)?;
 
+			// Check nonce
 			let current_nonce = AccountNonce::<T>::get(&who);
 			ensure!(current_nonce == nonce, Error::<T>::NonceError);
 
+			// Verify the signature
 			let hexed_call_data = hex::encode(&call_data);
 			let hexed_call_data_len = hexed_call_data.len() + 2;
 			let nonce_len = nonce.to_string().len();
@@ -276,12 +279,14 @@ pub mod pallet {
 			};
 			let public_key = recovered_key.to_encoded_point(true).to_bytes();
 
+			// Deserialize the caller
 			let decoded_account = T::AccountId::decode(&mut &blake2_256(&public_key)[..]).unwrap();
 			ensure!(
 				decoded_account == who,
 				Error::<T>::AccountMismatch
 			);
 
+			// Call
 			let mut origin: T::RuntimeOrigin = RawOrigin::Signed(who.clone()).into();
 			origin.add_filter(T::CallFilter::contains);
 			let call = <T as Config>::RuntimeCall::decode(&mut TrailingZeroInput::new(&call_data)).or(Err(Error::<T>::DecodeError))?;
@@ -293,6 +298,7 @@ pub mod pallet {
 				Err(error_and_info) => error_and_info.post_info,
 			};
 
+			// Deposit the call's result
 			Self::deposit_event(Event::CallDone {
 				who: who.clone(),
 				call_result,
@@ -313,6 +319,7 @@ pub mod pallet {
 
 			// TODO: Deposit `Event::<T>::TransactionFeePaid { who, actual_fee, tip }` event
 
+			// Update the nonce
 			AccountNonce::<T>::insert(&who, current_nonce + 1);
 
 			// TODO: need add the actual fee
