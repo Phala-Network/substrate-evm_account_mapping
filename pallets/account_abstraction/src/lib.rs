@@ -77,7 +77,7 @@ pub mod pallet {
 	#[pallet::generate_deposit(pub(super) fn deposit_event)]
 	pub enum Event<T: Config> {
 		/// A call just took place. \[result\]
-		CallDone { who: T::AccountId, call_result: DispatchResult },
+		CallDone { who: T::AccountId, call_result: DispatchResultWithPostInfo },
 	}
 
 	// Errors inform users that something went wrong.
@@ -86,10 +86,9 @@ pub mod pallet {
 		Unexpected,
 		InvalidSignature,
 		AccountMismatch,
-		EncodeError,
 		DecodeError,
 		NonceError,
-		Overweight,
+		PaymentError,
 	}
 
 	#[pallet::storage]
@@ -99,7 +98,7 @@ pub mod pallet {
 	impl<T: Config> ValidateUnsigned for Pallet<T>
 	where
 		BalanceOf<T>: Send + Sync + FixedPointOperand,
-		<T as frame_system::Config>::RuntimeCall: Dispatchable<Info = DispatchInfo>,
+		<T as frame_system::Config>::RuntimeCall: Dispatchable<Info = DispatchInfo, PostInfo = PostDispatchInfo>,
 	{
 		type Call = Call<T>;
 
@@ -160,6 +159,7 @@ pub mod pallet {
 			}
 
 			// Deserialize the call
+			// TODO: Configurable upper bound?
 			let actual_call = <T as Config>::RuntimeCall::decode(&mut TrailingZeroInput::new(call_data)).or(Err(InvalidTransaction::Call))?;
 
 			// Withdraw the est fee
@@ -174,6 +174,7 @@ pub mod pallet {
 				<<T as pallet_transaction_payment::Config>::OnChargeTransaction as OnChargeTransaction<T>>::withdraw_fee(who, &actual_call.into(), &info, est_fee, tip)?;
 
 			// Calculate priority
+			// Cheat from `get_priority` in frame/transaction-payment/src/lib.rs
 			use sp_runtime::{traits::One, Saturating, SaturatedConversion};
 			use frame_support::traits::Defensive;
 			// Calculate how many such extrinsics we could fit into an empty block and take the
@@ -238,7 +239,7 @@ pub mod pallet {
 	impl<T: Config> Pallet<T>
 	where
 		BalanceOf<T>: FixedPointOperand,
-		<T as frame_system::Config>::RuntimeCall: Dispatchable<Info = DispatchInfo>,
+		<T as frame_system::Config>::RuntimeCall: Dispatchable<Info = DispatchInfo, PostInfo = PostDispatchInfo>,
 	{
 		/// Meta-transaction from EVM compatible chains
 		#[pallet::call_index(0)]
@@ -281,50 +282,41 @@ pub mod pallet {
 				Error::<T>::AccountMismatch
 			);
 
-			let call = <T as Config>::RuntimeCall::decode(&mut TrailingZeroInput::new(&call_data)).or(Err(Error::<T>::DecodeError))?;
-			let mut weight_counter = WeightMeter::max_limit();
 			let mut origin: T::RuntimeOrigin = RawOrigin::Signed(who.clone()).into();
 			origin.add_filter(T::CallFilter::contains);
-			let (actual_weight, call_result) = Self::execute_dispatch(&mut weight_counter, origin, call.clone())?;
+			let call = <T as Config>::RuntimeCall::decode(&mut TrailingZeroInput::new(&call_data)).or(Err(Error::<T>::DecodeError))?;
+			let len = call.encoded_size();
+			let info = call.get_dispatch_info();
+			let call_result = call.dispatch(origin);
+			let post_info = match call_result {
+				Ok(post_info) => post_info,
+				Err(error_and_info) => error_and_info.post_info,
+			};
+
 			Self::deposit_event(Event::CallDone {
 				who: who.clone(),
 				call_result,
 			});
 
-			// TODO: the gas of meta tx itself need pay as well
-			let dispatch_info = DispatchInfo {
-				weight: actual_weight,
-				class: DispatchClass::Normal,
-				pays_fee: Pays::Yes,
-			};
+			// Should be the same as we withdrawn on `validate_unsigned`
+			// TODO: support tip
+			use sp_runtime::SaturatedConversion;
+			let tip = 0u32.saturated_into::<BalanceOf<T>>();
+			let est_fee = pallet_transaction_payment::Pallet::<T>::compute_fee(len as u32, &info, tip);
 
-			let actual_fee = pallet_transaction_payment::Pallet::<T>::compute_fee(
-				call_data.len() as u32,
-				&dispatch_info,
-				0u32.into()
-			);
+			let actual_fee = pallet_transaction_payment::Pallet::<T>::compute_actual_fee(len as u32, &info, &post_info, tip);
+			// TODO: port the logic here
+			// frame/transaction-payment/src/payment.rs
+			let _ = <<T as pallet_transaction_payment::Config>::OnChargeTransaction as OnChargeTransaction<T>>::correct_and_deposit_fee(
+				&who, &info, &post_info, actual_fee, tip, Default::default()
+			).map_err(|_err| Error::<T>::PaymentError)?;
 
-
-
-			// let _withdraw_result = <<T as pallet_transaction_payment::Config>::OnChargeTransaction as OnChargeTransaction<T>>::withdraw_fee(
-			// 	&who, &call.into(), &dispatch_info, actual_fee, 0u32.into(),
-			// );
-
-			let len = call.encoded_size();
-			let info = call.get_dispatch_info();
-			let est_fee = pallet_transaction_payment::Pallet::<T>::compute_fee(len as u32, &info, 0u32.into());
-
-				// let actual_fee = Pallet::<T>::compute_actual_fee(len as u32, info, post_info, tip);
-			// T::OnChargeTransaction::correct_and_deposit_fee(
-			// 	&who, info, post_info, actual_fee, tip, imbalance,
-			// )?;
-
-			// TODO: handle error
+			// TODO: Deposit `Event::<T>::TransactionFeePaid { who, actual_fee, tip }` event
 
 			AccountNonce::<T>::insert(&who, current_nonce + 1);
 
 			// TODO: need add the actual fee
-			Ok(Pays::Yes.into())
+			call_result
 		}
 	}
 
@@ -342,39 +334,6 @@ pub mod pallet {
 				&sig,
 				rid
 			).ok()
-		}
-
-		/// Make a dispatch to the given `call` from the given `origin`, ensuring that the `weight`
-		/// counter does not exceed its limit and that it is counted accurately (e.g. accounted using
-		/// post info if available).
-		///
-		/// NOTE: Only the weight for this function will be counted (origin lookup, dispatch and the
-		/// call itself).
-		///
-		/// Cheat from pallet-scheduler
-		pub(crate) fn execute_dispatch(
-			weight: &mut WeightMeter,
-			origin: T::RuntimeOrigin,
-			call: <T as Config>::RuntimeCall
-		) -> Result<(Weight, DispatchResult), Error<T>> {
-			let base_weight = Weight::zero();
-			let call_weight = call.get_dispatch_info().weight;
-			// We only allow a scheduled call if it cannot push the weight past the limit.
-			let max_weight = base_weight.saturating_add(call_weight);
-
-			if !weight.can_consume(max_weight) {
-				return Err(Error::<T>::Overweight)
-			}
-
-			let (maybe_actual_call_weight, result) = match call.dispatch(origin) {
-				Ok(post_info) => (post_info.actual_weight, Ok(())),
-				Err(error_and_info) =>
-					(error_and_info.post_info.actual_weight, Err(error_and_info.error)),
-			};
-			let call_weight = maybe_actual_call_weight.unwrap_or(call_weight);
-			let _ = weight.try_consume(base_weight);
-			let _ = weight.try_consume(call_weight);
-			Ok((call_weight, result))
 		}
 	}
 }
