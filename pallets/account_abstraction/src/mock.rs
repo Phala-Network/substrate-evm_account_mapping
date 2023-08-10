@@ -1,5 +1,6 @@
 use crate as pallet_account_abstraction;
 use frame_support::{
+	pallet_prelude::*,
 	dispatch::DispatchClass,
 	parameter_types,
 	traits::{
@@ -8,9 +9,7 @@ use frame_support::{
 	},
 	weights::{Weight, WeightToFee as WeightToFeeT},
 };
-use sp_core::H256;
 use sp_runtime::{traits::{BlakeTwo256, IdentifyAccount, IdentityLookup, Verify}, BuildStorage, MultiSignature, SaturatedConversion};
-use sp_api_hidden_includes_construct_runtime::hidden_include::traits::Hooks;
 use pallet_transaction_payment::CurrencyAdapter;
 
 type Block = frame_system::mocking::MockBlock<Test>;
@@ -62,7 +61,7 @@ impl frame_system::Config for Test {
 	type RuntimeOrigin = RuntimeOrigin;
 	type RuntimeCall = RuntimeCall;
 	type Nonce = u64;
-	type Hash = H256;
+	type Hash = sp_core::H256;
 	type Hashing = BlakeTwo256;
 	type AccountId = AccountId;
 	type Lookup = IdentityLookup<Self::AccountId>;
@@ -142,10 +141,21 @@ impl pallet_transaction_payment::Config for Test {
 	type FeeMultiplierUpdate = ();
 }
 
+parameter_types! {
+	pub EIP712Name: Vec<u8> = b"Substrate".to_vec();
+	pub EIP712Version: Vec<u8> = b"1".to_vec();
+	pub EIP712ChainID: crate::EIP712ChainID = sp_core::U256::from(0);
+	pub EIP712VerifyingContractAddress: crate::EIP712VerifyingContractAddress = sp_core::H160::from([0u8; 20]);
+}
+
 impl pallet_account_abstraction::Config for Test {
 	type RuntimeEvent = RuntimeEvent;
 	type RuntimeCall = RuntimeCall;
 	type CallFilter = frame_support::traits::Everything;
+	type EIP712Name = EIP712Name;
+	type EIP712Version = EIP712Version;
+	type EIP712ChainID = EIP712ChainID;
+	type EIP712VerifyingContractAddress = EIP712VerifyingContractAddress;
 	type WeightInfo = ();
 }
 
@@ -154,12 +164,12 @@ pub fn new_test_ext() -> sp_io::TestExternalities {
 	frame_system::GenesisConfig::<Test>::default().build_storage().unwrap().into()
 }
 
-pub fn run_to_block(n: u64) {
+pub(crate) fn run_to_block(n: u64) {
+	let current_block = System::block_number();
+	assert!(n > current_block);
 	while System::block_number() < n {
-		if System::block_number() > 1 {
-			System::on_finalize(System::block_number());
-		}
+		Balances::on_finalize(System::block_number());
 		System::set_block_number(System::block_number() + 1);
-		System::on_initialize(System::block_number());
+		Balances::on_initialize(System::block_number());
 	}
 }

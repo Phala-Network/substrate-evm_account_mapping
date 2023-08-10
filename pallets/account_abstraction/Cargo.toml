@@ -18,6 +18,7 @@ scale-info = { version = "2.9.0", default-features = false, features = ["derive"
 sp-io = { git = "https://github.com/paritytech/substrate", branch = "master", default-features = false }
 sp-runtime = { git = "https://github.com/paritytech/substrate", branch = "master", default-features = false }
 sp-std = { git = "https://github.com/paritytech/substrate", branch = "master", default-features = false }
+sp-core = { git = "https://github.com/paritytech/substrate", branch = "master", default-features = false, features = ["serde"] }
 frame-benchmarking = { git = "https://github.com/paritytech/substrate", branch = "master", optional = true, default-features = false }
 frame-support = { git = "https://github.com/paritytech/substrate", branch = "master", default-features = false }
 frame-system = { git = "https://github.com/paritytech/substrate", branch = "master", default-features = false }
@@ -26,9 +27,9 @@ pallet-transaction-payment = { git = "https://github.com/paritytech/substrate", 
 hex = { version = "0.4", default-features = false, features = ["alloc"] }
 log = { version = "0.4.18", default-features = false }
 k256 = { version = "0.13.1", default-features = false, features = ["alloc", "ecdsa"] }
+ethabi = { version = "18.0.0", default-features = false }
 
 [dev-dependencies]
-sp-core = { git = "https://github.com/paritytech/substrate", branch = "master" }
 pallet-balances = { git = "https://github.com/paritytech/substrate", branch = "master" }
 
 [features]
@@ -39,6 +40,7 @@ std = [
 	"sp-io/std",
 	"sp-runtime/std",
 	"sp-std/std",
+	"sp-core/std",
 	"frame-benchmarking?/std",
 	"frame-support/std",
 	"frame-system/std",
@@ -46,6 +48,7 @@ std = [
 	"hex/std",
 	"log/std",
 	"k256/std",
+	"ethabi/std",
 ]
 runtime-benchmarks = [
 	"frame-benchmarking/runtime-benchmarks",

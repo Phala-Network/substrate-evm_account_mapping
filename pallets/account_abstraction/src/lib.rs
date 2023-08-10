@@ -1,8 +1,9 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
-extern crate alloc;
-
 pub use pallet::*;
+
+mod eip712;
+mod encode;
 
 #[cfg(test)]
 mod mock;
@@ -32,13 +33,16 @@ macro_rules! log {
 use frame_support::{
 	dispatch::{Dispatchable, DispatchInfo, PostDispatchInfo, GetDispatchInfo, RawOrigin},
 	traits::{Contains, OriginTrait},
-	weights::{Weight, WeightMeter},
+	weights::Weight,
 };
 use sp_runtime::FixedPointOperand;
 use pallet_transaction_payment::OnChargeTransaction;
 use sp_runtime::traits::TrailingZeroInput;
 
 type BalanceOf<T> = <<T as pallet_transaction_payment::Config>::OnChargeTransaction as OnChargeTransaction<T>>::Balance;
+
+pub type EIP712ChainID = sp_core::U256;
+pub type EIP712VerifyingContractAddress = sp_core::H160;
 
 #[frame_support::pallet]
 pub mod pallet {
@@ -66,6 +70,18 @@ pub mod pallet {
 		+ IsType<<Self as frame_system::Config>::RuntimeCall>;
 
 		type CallFilter: Contains<<Self as frame_system::Config>::RuntimeCall>;
+
+		#[pallet::constant]
+		type EIP712Name: Get<Vec<u8>>;
+
+		#[pallet::constant]
+		type EIP712Version: Get<Vec<u8>>;
+
+		#[pallet::constant]
+		type EIP712ChainID: Get<EIP712ChainID>;
+
+		#[pallet::constant]
+		type EIP712VerifyingContractAddress: Get<EIP712VerifyingContractAddress>;
 
 		/// Type representing the weight of this pallet
 		type WeightInfo: WeightInfo;
@@ -99,6 +115,8 @@ pub mod pallet {
 	where
 		BalanceOf<T>: Send + Sync + FixedPointOperand,
 		<T as frame_system::Config>::RuntimeCall: Dispatchable<Info = DispatchInfo, PostInfo = PostDispatchInfo>,
+		<T as frame_system::Config>::AccountId: From<[u8; 32]> + Into<[u8; 32]>,
+		T: frame_system::Config<AccountId = sp_runtime::AccountId32>
 	{
 		type Call = Call<T>;
 
@@ -126,29 +144,45 @@ pub mod pallet {
 				_ => {}
 			};
 
-			// Validate the signature
-			// TODO: Rewrite when implement EIP-712
-			use alloc::string::{String, ToString};
-			use sp_io::hashing::{blake2_256, keccak_256};
+			// Verify the signature
+			let eip712_domain = crate::eip712::EIP712Domain {
+				name: T::EIP712Name::get(),
+				version: T::EIP712Version::get(),
+				chain_id: T::EIP712ChainID::get(),
+				verifying_contract: T::EIP712VerifyingContractAddress::get(),
+				salt: None,
+			};
+			let domain_separator = eip712_domain.separator();
 
-			let hexed_call_data = hex::encode(&call_data);
-			let hexed_call_data_len = hexed_call_data.len() + 2;
-			let nonce_len = nonce.to_string().len();
+			let type_hash = sp_io::hashing::keccak_256(
+				"SubstrateCall(string who,bytes callData,uint64 nonce)".as_bytes(),
+			);
+			// Token::Uint(U256::from(keccak_256(&self.name)))
+			use sp_core::crypto::Ss58Codec;
+			let ss58_who = who.to_ss58check();
+			let hashed_call_data = sp_io::hashing::keccak_256(&call_data);
+			let message_hash = sp_io::hashing::keccak_256(&ethabi::encode(&[
+				ethabi::Token::FixedBytes(type_hash.to_vec()),
+				ethabi::Token::FixedBytes(sp_io::hashing::keccak_256(ss58_who.as_bytes()).to_vec()),
+				ethabi::Token::FixedBytes(hashed_call_data.to_vec()),
+				ethabi::Token::Uint((*nonce).into()),
+			]));
 
-			let mut eip191_message = String::from("\x19Ethereum Signed Message:\n");
-			eip191_message.push_str(&(hexed_call_data_len + nonce_len).to_string());
-			eip191_message.push_str(&nonce.to_string());
-			eip191_message.push_str("0x");
-			eip191_message.push_str(&hexed_call_data);
+			let typed_data_hash_input = &vec![
+				crate::encode::SolidityDataType::String("\x19\x01"),
+				crate::encode::SolidityDataType::Bytes(&domain_separator),
+				crate::encode::SolidityDataType::Bytes(&message_hash),
+			];
+			let bytes = crate::encode::abi::encode_packed(typed_data_hash_input);
+			let message_hash = sp_io::hashing::keccak_256(bytes.as_slice());
 
-			let message_hash = keccak_256(eip191_message.as_bytes());
 			let Some(recovered_key) = Pallet::<T>::ecdsa_recover_public_key(signature, &message_hash) else {
 				return Err(InvalidTransaction::BadProof.into())
 			};
 
 			// Validate the caller
 			let public_key = recovered_key.to_encoded_point(true).to_bytes();
-			let decoded_account = T::AccountId::decode(&mut &blake2_256(&public_key)[..]).unwrap();
+			let decoded_account = T::AccountId::decode(&mut &sp_io::hashing::blake2_256(&public_key)[..]).unwrap();
 			if who != &decoded_account {
 				return Err(InvalidTransaction::BadSigner.into())
 			}
@@ -239,6 +273,7 @@ pub mod pallet {
 	where
 		BalanceOf<T>: FixedPointOperand,
 		<T as frame_system::Config>::RuntimeCall: Dispatchable<Info = DispatchInfo, PostInfo = PostDispatchInfo>,
+		T: frame_system::Config<AccountId = sp_runtime::AccountId32>,
 	{
 		/// Meta-transaction from EVM compatible chains
 		#[pallet::call_index(0)]
@@ -250,7 +285,6 @@ pub mod pallet {
 			nonce: u64,
 			signature: [u8; 65]
 		) -> DispatchResultWithPostInfo {
-			use alloc::string::{String, ToString};
 			use sp_io::hashing::{blake2_256, keccak_256};
 
 			// This is an unsigned transaction
@@ -258,20 +292,40 @@ pub mod pallet {
 
 			// Check nonce
 			let current_nonce = AccountNonce::<T>::get(&who);
-			ensure!(current_nonce == nonce, Error::<T>::NonceError);
+			ensure!(current_nonce == nonce + 1, Error::<T>::NonceError); // We already bump the nonce on validate_unsigned stage
 
 			// Verify the signature
-			let hexed_call_data = hex::encode(&call_data);
-			let hexed_call_data_len = hexed_call_data.len() + 2;
-			let nonce_len = nonce.to_string().len();
+			let eip712_domain = crate::eip712::EIP712Domain {
+				name: T::EIP712Name::get(),
+				version: T::EIP712Version::get(),
+				chain_id: T::EIP712ChainID::get(),
+				verifying_contract: T::EIP712VerifyingContractAddress::get(),
+				salt: None,
+			};
+			let domain_separator = eip712_domain.separator();
 
-			let mut eip191_message = String::from("\x19Ethereum Signed Message:\n");
-			eip191_message.push_str(&(hexed_call_data_len + nonce_len).to_string());
-			eip191_message.push_str(&nonce.to_string());
-			eip191_message.push_str("0x");
-			eip191_message.push_str(&hexed_call_data);
+			let type_hash = sp_io::hashing::keccak_256(
+				"SubstrateCall(string who,bytes callData,uint64 nonce)".as_bytes(),
+			);
+			// Token::Uint(U256::from(keccak_256(&self.name)))
+			use sp_core::crypto::Ss58Codec;
+			let ss58_who = who.to_ss58check();
+			let hashed_call_data = sp_io::hashing::keccak_256(&call_data);
+			let message_hash = sp_io::hashing::keccak_256(&ethabi::encode(&[
+				ethabi::Token::FixedBytes(type_hash.to_vec()),
+				ethabi::Token::FixedBytes(sp_io::hashing::keccak_256(ss58_who.as_bytes()).to_vec()),
+				ethabi::Token::FixedBytes(hashed_call_data.to_vec()),
+				ethabi::Token::Uint(nonce.into()),
+			]));
 
-			let message_hash = keccak_256(eip191_message.as_bytes());
+			let typed_data_hash_input = &vec![
+				crate::encode::SolidityDataType::String("\x19\x01"),
+				crate::encode::SolidityDataType::Bytes(&domain_separator),
+				crate::encode::SolidityDataType::Bytes(&message_hash),
+			];
+			let bytes = crate::encode::abi::encode_packed(typed_data_hash_input);
+			let message_hash = sp_io::hashing::keccak_256(bytes.as_slice());
+
 			let Some(recovered_key) = Self::ecdsa_recover_public_key(&signature, &message_hash) else {
 				return Err(Error::<T>::InvalidSignature.into())
 			};

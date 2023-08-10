@@ -266,10 +266,21 @@ impl pallet_sudo::Config for Runtime {
 	type WeightInfo = pallet_sudo::weights::SubstrateWeight<Runtime>;
 }
 
+parameter_types! {
+	pub EIP712Name: Vec<u8> = b"Substrate".to_vec();
+	pub EIP712Version: Vec<u8> = b"1".to_vec();
+	pub EIP712ChainID: pallet_account_abstraction::EIP712ChainID = sp_core::U256::from(0);
+	pub EIP712VerifyingContractAddress: pallet_account_abstraction::EIP712VerifyingContractAddress = sp_core::H160::from([0u8; 20]);
+}
+
 impl pallet_account_abstraction::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type RuntimeCall = RuntimeCall;
 	type CallFilter = frame_support::traits::Everything;
+	type EIP712Name = EIP712Name;
+	type EIP712Version = EIP712Version;
+	type EIP712ChainID = EIP712ChainID;
+	type EIP712VerifyingContractAddress = EIP712VerifyingContractAddress;
 	type WeightInfo = ();
 }
 
