@@ -167,7 +167,7 @@ pub mod pallet {
 			};
 
 			// Check the signature and get the public key
-			let message_hash = Self::eip712_message_hash(who.clone(), &call_data, *nonce);
+			let message_hash = Self::eip712_message_hash(who.clone(), call_data, *nonce);
 			let Some(recovered_key) = Pallet::<T>::ecdsa_recover_public_key(signature, &message_hash) else {
 				return Err(InvalidTransaction::BadProof.into())
 			};
@@ -329,7 +329,7 @@ pub mod pallet {
 			nonce: Nonce,
 			signature: [u8; 65],
 			tip: Option<PaymentBalanceOf<T>>,
-		) -> DispatchResultWithPostInfo {
+		) -> DispatchResult {
 			use sp_io::hashing::{blake2_256};
 
 			// This is an unsigned transaction
@@ -376,8 +376,7 @@ pub mod pallet {
 			).map_err(|_err| Error::<T>::PaymentError)?;
 			Self::deposit_event(Event::TransactionFeePaid { who: who.clone(), actual_fee, tip });
 
-			// TODO: need add the actual fee
-			call_result
+			Ok(())
 		}
 	}
 
@@ -423,7 +422,7 @@ pub mod pallet {
 			// Token::Uint(U256::from(keccak_256(&self.name)))
 			use sp_core::crypto::Ss58Codec;
 			let ss58_who = who.to_ss58check_with_version(T::SS58Prefix::get().into());
-			let hashed_call_data = sp_io::hashing::keccak_256(&call_data);
+			let hashed_call_data = sp_io::hashing::keccak_256(call_data);
 			let message_hash = sp_io::hashing::keccak_256(&ethabi::encode(&[
 				ethabi::Token::FixedBytes(type_hash.to_vec()),
 				ethabi::Token::FixedBytes(sp_io::hashing::keccak_256(ss58_who.as_bytes()).to_vec()),
