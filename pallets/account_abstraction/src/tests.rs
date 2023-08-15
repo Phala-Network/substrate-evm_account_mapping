@@ -1,10 +1,10 @@
 #[allow(unused)]
 use crate::{mock::*, Error, Event};
 use codec::Decode;
-use frame_support::{assert_noop, assert_ok};
-use k256::ecdsa::signature;
+use frame_support::{assert_ok};
+
 use sp_core::crypto::Ss58Codec;
-use sp_runtime::traits::TrailingZeroInput;
+
 
 #[test]
 fn it_works() {
@@ -17,7 +17,7 @@ fn it_works() {
 		let nonce: u64 = 0;
 		let signature: [u8; 65] = hex::decode("37cb6ff8e296d7e476ee13a6cfababe788217519d428fcc723b482dc97cb4d1359a8d1c020fe3cebc1d06a67e61b1f0e296739cecacc640b0ba48e8a7555472e1b").expect("Decodable").try_into().expect("Valid");
 
-		set_balance(account.clone(), 1 * DOLLARS);
+		set_balance(account.clone(), DOLLARS);
 
 		// TODO: this skip validate_unsigned so the nonce will mismatch
 		// Dispatch a signed extrinsic.
@@ -96,7 +96,7 @@ fn eip712() {
 	let recovered_key = VerifyingKey::recover_from_prehash(&signing_message, &sig, rid).unwrap();
 
 	let public_key = recovered_key.to_encoded_point(true);
-	println!("0x{}", hex::encode(&public_key));
+	println!("0x{}", hex::encode(public_key));
 
 	let decoded_account =
 		AccountId::decode(&mut &sp_io::hashing::blake2_256(&public_key.to_bytes())[..])

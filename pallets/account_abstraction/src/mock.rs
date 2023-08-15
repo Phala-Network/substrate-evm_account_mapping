@@ -45,7 +45,7 @@ impl Get<frame_system::limits::BlockWeights> for BlockWeights {
 		frame_system::limits::BlockWeights::builder()
 			.base_block(Weight::zero())
 			.for_class(DispatchClass::all(), |weights| {
-				weights.base_extrinsic = ExtrinsicBaseWeight::get().into();
+				weights.base_extrinsic = ExtrinsicBaseWeight::get();
 			})
 			.for_class(DispatchClass::non_mandatory(), |weights| {
 				weights.max_total = Weight::from_parts(1024, u64::MAX).into();

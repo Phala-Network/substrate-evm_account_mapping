@@ -179,7 +179,7 @@ pub mod pallet {
 			// Token::Uint(U256::from(keccak_256(&self.name)))
 			use sp_core::crypto::Ss58Codec;
 			let ss58_who = who.to_ss58check();
-			let hashed_call_data = sp_io::hashing::keccak_256(&call_data);
+			let hashed_call_data = sp_io::hashing::keccak_256(call_data);
 			let message_hash = sp_io::hashing::keccak_256(&ethabi::encode(&[
 				ethabi::Token::FixedBytes(type_hash.to_vec()),
 				ethabi::Token::FixedBytes(sp_io::hashing::keccak_256(ss58_who.as_bytes()).to_vec()),
@@ -214,7 +214,7 @@ pub mod pallet {
 			// Skip frame_system::CheckEra<Runtime>
 
 			// frame_system::CheckNonce<Runtime>
-			let account_nonce = AccountNonce::<T>::get(&who);
+			let account_nonce = AccountNonce::<T>::get(who);
 			if nonce < &account_nonce {
 				return Err(InvalidTransaction::Stale.into());
 			}
@@ -232,7 +232,7 @@ pub mod pallet {
 				}
 				.into());
 			}
-			AccountNonce::<T>::insert(&who, account_nonce + 1);
+			AccountNonce::<T>::insert(who, account_nonce + 1);
 
 			// Deserialize the call
 			// TODO: Configurable upper bound?
@@ -336,7 +336,7 @@ pub mod pallet {
 		/// Meta-transaction from EVM compatible chains
 		#[pallet::call_index(0)]
 		#[pallet::weight({
-			let call = <T as Config>::RuntimeCall::decode(&mut TrailingZeroInput::new(&call_data)).or(Err(Error::<T>::DecodeError));
+			let call = <T as Config>::RuntimeCall::decode(&mut TrailingZeroInput::new(call_data)).or(Err(Error::<T>::DecodeError));
 			if let Ok(call) = call {
 				let di = call.get_dispatch_info();
 				// TODO: benchmarking here
@@ -357,7 +357,7 @@ pub mod pallet {
 			signature: [u8; 65],
 			tip: Option<PaymentBalanceOf<T>>,
 		) -> DispatchResultWithPostInfo {
-			use sp_io::hashing::{blake2_256, keccak_256};
+			use sp_io::hashing::{blake2_256};
 
 			// This is an unsigned transaction
 			ensure_none(origin)?;
@@ -427,7 +427,7 @@ pub mod pallet {
 
 			// Should be the same as we withdrawn on `validate_unsigned`
 			// TODO: support tip
-			use sp_runtime::SaturatedConversion;
+			
 
 			let actual_fee = pallet_transaction_payment::Pallet::<T>::compute_actual_fee(
 				len as u32, &info, &post_info, tip,
@@ -436,7 +436,7 @@ pub mod pallet {
 			// T::Currency::transfer(&owner, &worker, initial_balance, Preservation::Preserve)?;
 			// TODO: port the logic here
 			// frame/transaction-payment/src/payment.rs
-			let _ = <<T as pallet_transaction_payment::Config>::OnChargeTransaction as OnChargeTransaction<T>>::correct_and_deposit_fee(
+			<<T as pallet_transaction_payment::Config>::OnChargeTransaction as OnChargeTransaction<T>>::correct_and_deposit_fee(
 				&who, &info, &post_info, actual_fee, tip, already_withdrawn
 			).map_err(|_err| Error::<T>::PaymentError)?;
 
