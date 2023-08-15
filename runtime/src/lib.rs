@@ -283,7 +283,7 @@ impl pallet_account_abstraction::Config for Runtime {
 	type EIP712Version = EIP712Version;
 	type EIP712ChainID = EIP712ChainID;
 	type EIP712VerifyingContractAddress = EIP712VerifyingContractAddress;
-	type WeightInfo = ();
+	type WeightInfo = pallet_account_abstraction::weights::SubstrateWeight<Runtime>;
 }
 
 // Create the runtime by composing the FRAME pallets that were previously configured.
