@@ -32,14 +32,27 @@ macro_rules! log {
 
 use frame_support::{
 	dispatch::{Dispatchable, DispatchInfo, PostDispatchInfo, GetDispatchInfo, RawOrigin},
-	traits::{Contains, OriginTrait},
+	traits::{
+		fungible::{
+			Inspect as InspectFungible,
+			Mutate as MutateFungible,
+		},
+		tokens::{
+			WithdrawReasons, ExistenceRequirement,
+			Fortitude, Preservation
+		},
+		Currency, Contains, OriginTrait,
+	},
 	weights::Weight,
 };
 use sp_runtime::FixedPointOperand;
 use pallet_transaction_payment::OnChargeTransaction;
 use sp_runtime::traits::TrailingZeroInput;
 
-type BalanceOf<T> = <<T as pallet_transaction_payment::Config>::OnChargeTransaction as OnChargeTransaction<T>>::Balance;
+type PaymentBalanceOf<T> = <<T as pallet_transaction_payment::Config>::OnChargeTransaction as OnChargeTransaction<T>>::Balance;
+
+type BalanceOf<T> =
+	<<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
 
 pub type EIP712ChainID = sp_core::U256;
 pub type EIP712VerifyingContractAddress = sp_core::H160;
@@ -69,6 +82,12 @@ pub mod pallet {
 		+ scale_info::TypeInfo
 		+ IsType<<Self as frame_system::Config>::RuntimeCall>;
 
+		/// The system's currency for payment.
+		type Currency: Currency<Self::AccountId> + InspectFungible<Self::AccountId> + MutateFungible<Self::AccountId>;
+
+		#[pallet::constant]
+		type ServiceFee: Get<BalanceOf<Self>>;
+
 		type CallFilter: Contains<<Self as frame_system::Config>::RuntimeCall>;
 
 		#[pallet::constant]
@@ -92,7 +111,8 @@ pub mod pallet {
 	#[pallet::event]
 	#[pallet::generate_deposit(pub(super) fn deposit_event)]
 	pub enum Event<T: Config> {
-		/// A call just took place. \[result\]
+		ServiceFeePaid { who: T::AccountId, fee: BalanceOf<T> },
+		TransactionFeePaid { who: T::AccountId, actual_fee: PaymentBalanceOf<T>, tip: PaymentBalanceOf<T> },
 		CallDone { who: T::AccountId, call_result: DispatchResultWithPostInfo },
 	}
 
@@ -113,7 +133,7 @@ pub mod pallet {
 	#[pallet::validate_unsigned]
 	impl<T: Config> ValidateUnsigned for Pallet<T>
 	where
-		BalanceOf<T>: Send + Sync + FixedPointOperand,
+		PaymentBalanceOf<T>: Send + Sync + FixedPointOperand,
 		<T as frame_system::Config>::RuntimeCall: Dispatchable<Info = DispatchInfo, PostInfo = PostDispatchInfo>,
 		<T as frame_system::Config>::AccountId: From<[u8; 32]> + Into<[u8; 32]>,
 		T: frame_system::Config<AccountId = sp_runtime::AccountId32>
@@ -127,24 +147,12 @@ pub mod pallet {
 				ref call_data,
 				ref nonce,
 				ref signature,
+				ref tip,
 			} = call else {
 				return Err(InvalidTransaction::Call.into())
 			};
 
-			// Check nonce
-			use sp_std::cmp::Ordering;
-			let current_nonce = AccountNonce::<T>::get(&who);
-			match nonce.cmp(&current_nonce) {
-				Ordering::Greater => {
-					return Err(InvalidTransaction::Future.into())
-				},
-				Ordering::Less => {
-					return Err(InvalidTransaction::Stale.into())
-				},
-				_ => {}
-			};
-
-			// Verify the signature
+			// Check the signature
 			let eip712_domain = crate::eip712::EIP712Domain {
 				name: T::EIP712Name::get(),
 				version: T::EIP712Version::get(),
@@ -180,30 +188,73 @@ pub mod pallet {
 				return Err(InvalidTransaction::BadProof.into())
 			};
 
-			// Validate the caller
+			// Check the caller
 			let public_key = recovered_key.to_encoded_point(true).to_bytes();
 			let decoded_account = T::AccountId::decode(&mut &sp_io::hashing::blake2_256(&public_key)[..]).unwrap();
 			if who != &decoded_account {
 				return Err(InvalidTransaction::BadSigner.into())
 			}
 
+			// Skip frame_system::CheckNonZeroSender
+			// Skip frame_system::CheckSpecVersion<Runtime>
+			// Skip frame_system::CheckTxVersion<Runtime>
+			// Skip frame_system::CheckGenesis<Runtime>
+			// Skip frame_system::CheckEra<Runtime>
+
+			// frame_system::CheckNonce<Runtime>
+			let account_nonce = AccountNonce::<T>::get(&who);
+			if nonce < &account_nonce {
+				return Err(InvalidTransaction::Stale.into())
+			}
+			let provides = (who, nonce).encode();
+			let requires = if &account_nonce < nonce && nonce > &0u64 {
+				Some((who, nonce - 1).encode())
+			} else {
+				None
+			};
+			if nonce != &account_nonce {
+				return Err(if nonce < &account_nonce {
+					InvalidTransaction::Stale
+				} else {
+					InvalidTransaction::Future
+				}.into())
+			}
+			AccountNonce::<T>::insert(&who, account_nonce + 1);
+
 			// Deserialize the call
 			// TODO: Configurable upper bound?
 			let actual_call = <T as Config>::RuntimeCall::decode(&mut TrailingZeroInput::new(call_data)).or(Err(InvalidTransaction::Call))?;
 
-			// Withdraw the est fee
-			// TODO: support tip
-			let tip = 0u32.saturated_into::<BalanceOf<T>>();
+			// Skip frame_system::CheckWeight<Runtime>
+			// it has implemented `validate_unsigned` and `pre_dispatch_unsigned`, we don't need to do the validate here.
+
+			// Before we check payment, we let the account pay the service fee
+			T::Currency::withdraw(
+				who,
+				T::ServiceFee::get(),
+				WithdrawReasons::TRANSACTION_PAYMENT,
+				ExistenceRequirement::KeepAlive
+			).or(Err(InvalidTransaction::Payment))?;
+
+			Self::deposit_event(Event::ServiceFeePaid {
+				who: who.clone(),
+				fee: T::ServiceFee::get()
+			});
+
+			// pallet_transaction_payment::ChargeTransactionPayment<Runtime>
+			let tip = tip.unwrap_or(0u32.into());
 			let len = actual_call.encoded_size();
 			let info = actual_call.get_dispatch_info();
 			// We shall get the same `fee` later
-			// TODO: We can't get the exact fee for `Call::remote_call_from_evm_chain`, perhaps we can hard code a service fee?
 			let est_fee = pallet_transaction_payment::Pallet::<T>::compute_fee(len as u32, &info, tip);
-			let _ =
-				<<T as pallet_transaction_payment::Config>::OnChargeTransaction as OnChargeTransaction<T>>::withdraw_fee(who, &actual_call.into(), &info, est_fee, tip)?;
-
-			// Update the nonce
-			AccountNonce::<T>::insert(&who, current_nonce + 1);
+			// We don't withdraw the fee here, because we can't cache the imbalance
+			// Instead, we check the account has enough fee
+			// I think this is a hack, or the type can't match
+			let est_fee: u128 = est_fee.try_into().or(Err(InvalidTransaction::Payment))?;
+			let usable_balance_for_fees: u128 = T::Currency::reducible_balance(who, Preservation::Protect, Fortitude::Polite).try_into().or(Err(InvalidTransaction::Payment))?;
+			if usable_balance_for_fees < est_fee {
+				return Err(InvalidTransaction::Payment.into())
+			}
 
 			// Calculate priority
 			// Cheat from `get_priority` in frame/transaction-payment/src/lib.rs
@@ -230,8 +281,8 @@ pub mod pallet {
 			// `priority` distribution instead of having all transactions saturate the priority.
 			let max_tx_per_block = max_tx_per_block_length
 				.min(max_tx_per_block_weight)
-				.saturated_into::<BalanceOf<T>>();
-			let max_reward = |val: BalanceOf<T>| val.saturating_mul(max_tx_per_block);
+				.saturated_into::<PaymentBalanceOf<T>>();
+			let max_reward = |val: PaymentBalanceOf<T>| val.saturating_mul(max_tx_per_block);
 
 			// To distribute no-tip transactions a little bit, we increase the tip value by one.
 			// This means that given two transactions without a tip, smaller one will be preferred.
@@ -241,29 +292,17 @@ pub mod pallet {
 			let priority = scaled_tip.saturated_into::<TransactionPriority>();
 
 			// Finish the validation
-			ValidTransaction::with_tag_prefix("AccountAbstraction")
-				// We set base priority to 2**20 and hope it's included before any
-				// other transactions in the pool.
-				.priority(priority)
-				// This transaction does not require anything else to go before into
-				// the pool. In theory we could require `previous_unsigned_at`
-				// transaction to go first, but it's not necessary in our case.
-				//.and_requires() We set the `provides` tag to be the same as
-				// `next_unsigned_at`. This makes sure only one transaction produced
-				// after `next_unsigned_at` will ever get to the transaction pool
-				// and will end up in the block. We can still have multiple
-				// transactions compete for the same "spot", and the one with higher
-				// priority will replace other one in the pool.
-				.and_provides((who, nonce).encode())
-				// The transaction is only valid for next 5 blocks. After that it's
-				// going to be revalidated by the pool.
-				.longevity(5)
-				// It's fine to propagate that transaction to other peers, which
-				// means it can be created even by nodes that don't produce blocks.
-				// Note that sometimes it's better to keep it for yourself (if you
-				// are the block producer), since for instance in some schemes
-				// others may copy your solution and claim a reward.
-				.propagate(true)
+			let valid_transaction_builder =
+				ValidTransaction::with_tag_prefix("AccountAbstraction")
+					.priority(priority)
+					.and_provides(provides)
+					.longevity(5)
+					.propagate(true);
+			let Some(requires) = requires else {
+				return valid_transaction_builder.build()
+			};
+			valid_transaction_builder
+				.and_requires(requires)
 				.build()
 		}
 	}
@@ -271,28 +310,38 @@ pub mod pallet {
 	#[pallet::call]
 	impl<T: Config> Pallet<T>
 	where
-		BalanceOf<T>: FixedPointOperand,
+		PaymentBalanceOf<T>: FixedPointOperand,
 		<T as frame_system::Config>::RuntimeCall: Dispatchable<Info = DispatchInfo, PostInfo = PostDispatchInfo>,
 		T: frame_system::Config<AccountId = sp_runtime::AccountId32>,
 	{
 		/// Meta-transaction from EVM compatible chains
 		#[pallet::call_index(0)]
-		#[pallet::weight({0})]
+		#[pallet::weight({
+			let call = <T as Config>::RuntimeCall::decode(&mut TrailingZeroInput::new(&call_data)).or(Err(Error::<T>::DecodeError));
+			if let Ok(call) = call {
+				let di = call.get_dispatch_info();
+				// TODO: benchmarking here
+				(
+					Weight::zero().saturating_add(di.weight),
+					di.class
+				)
+			} else {
+				// TODO: benchmarking here
+				(Weight::zero(), DispatchClass::Normal)
+			}
+		})]
 		pub fn remote_call_from_evm_chain(
 			origin: OriginFor<T>,
 			who: T::AccountId,
 			call_data: BoundedVec<u8, ConstU32<2048>>,
 			nonce: u64,
-			signature: [u8; 65]
+			signature: [u8; 65],
+			tip: Option<PaymentBalanceOf<T>>
 		) -> DispatchResultWithPostInfo {
 			use sp_io::hashing::{blake2_256, keccak_256};
 
 			// This is an unsigned transaction
 			ensure_none(origin)?;
-
-			// Check nonce
-			let current_nonce = AccountNonce::<T>::get(&who);
-			ensure!(current_nonce == nonce + 1, Error::<T>::NonceError); // We already bump the nonce on validate_unsigned stage
 
 			// Verify the signature
 			let eip712_domain = crate::eip712::EIP712Domain {
@@ -344,6 +393,11 @@ pub mod pallet {
 			let call = <T as Config>::RuntimeCall::decode(&mut TrailingZeroInput::new(&call_data)).or(Err(Error::<T>::DecodeError))?;
 			let len = call.encoded_size();
 			let info = call.get_dispatch_info();
+			let tip = tip.unwrap_or(0u32.into());
+			let est_fee = pallet_transaction_payment::Pallet::<T>::compute_fee(len as u32, &info, tip);
+			let already_withdrawn =
+				<<T as pallet_transaction_payment::Config>::OnChargeTransaction as OnChargeTransaction<T>>::withdraw_fee(&who, &call.clone().into(), &info, est_fee, tip).map_err(|_err| Error::<T>::PaymentError)?;
+
 			let call_result = call.dispatch(origin);
 			let post_info = match call_result {
 				Ok(post_info) => post_info,
@@ -359,17 +413,22 @@ pub mod pallet {
 			// Should be the same as we withdrawn on `validate_unsigned`
 			// TODO: support tip
 			use sp_runtime::SaturatedConversion;
-			let tip = 0u32.saturated_into::<BalanceOf<T>>();
-			let est_fee = pallet_transaction_payment::Pallet::<T>::compute_fee(len as u32, &info, tip);
+
 
 			let actual_fee = pallet_transaction_payment::Pallet::<T>::compute_actual_fee(len as u32, &info, &post_info, tip);
+
+			// T::Currency::transfer(&owner, &worker, initial_balance, Preservation::Preserve)?;
 			// TODO: port the logic here
 			// frame/transaction-payment/src/payment.rs
 			let _ = <<T as pallet_transaction_payment::Config>::OnChargeTransaction as OnChargeTransaction<T>>::correct_and_deposit_fee(
-				&who, &info, &post_info, actual_fee, tip, Default::default()
+				&who, &info, &post_info, actual_fee, tip, already_withdrawn
 			).map_err(|_err| Error::<T>::PaymentError)?;
 
-			// TODO: Deposit `Event::<T>::TransactionFeePaid { who, actual_fee, tip }` event
+			Self::deposit_event(Event::TransactionFeePaid {
+				who: who.clone(),
+				actual_fee,
+				tip
+			});
 
 			// TODO: need add the actual fee
 			call_result

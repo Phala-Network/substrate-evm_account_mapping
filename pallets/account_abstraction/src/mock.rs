@@ -4,6 +4,7 @@ use frame_support::{
 	dispatch::DispatchClass,
 	parameter_types,
 	traits::{
+		fungible::Mutate,
 		ConstU16, ConstU32, ConstU64, ConstU128,
 		Get, Imbalance, OnUnbalanced,
 	},
@@ -14,9 +15,14 @@ use pallet_transaction_payment::CurrencyAdapter;
 
 type Block = frame_system::mocking::MockBlock<Test>;
 
+pub(crate) type Balance = u128;
 pub(crate) type Signature = MultiSignature;
 pub(crate) type AccountPublic = <Signature as Verify>::Signer;
 pub(crate) type AccountId = <AccountPublic as IdentifyAccount>::AccountId;
+
+pub(crate) const MILLI_CENTS: Balance = 1_000_000;
+pub(crate) const CENTS: Balance = 1_000 * MILLI_CENTS;
+pub(crate) const DOLLARS: Balance = 100 * CENTS;
 
 // Configure a mock runtime to test the pallet.
 frame_support::construct_runtime!(
@@ -48,8 +54,8 @@ impl Get<frame_system::limits::BlockWeights> for BlockWeights {
 }
 
 parameter_types! {
-	pub static WeightToFee: u128 = 1;
-	pub static TransactionByteFee: u128 = 1;
+	pub static WeightToFee: Balance = 1;
+	pub static TransactionByteFee: Balance = 1;
 	pub static OperationalFeeMultiplier: u8 = 5;
 }
 
@@ -70,7 +76,7 @@ impl frame_system::Config for Test {
 	type DbWeight = ();
 	type Version = ();
 	type PalletInfo = PalletInfo;
-	type AccountData = pallet_balances::AccountData<u128>;
+	type AccountData = pallet_balances::AccountData<Balance>;
 	type OnNewAccount = ();
 	type OnKilledAccount = ();
 	type SystemWeightInfo = ();
@@ -82,9 +88,9 @@ impl frame_system::Config for Test {
 impl pallet_balances::Config for Test {
 	type RuntimeEvent = RuntimeEvent;
 	type WeightInfo = ();
-	type Balance = u128;
+	type Balance = Balance;
 	type DustRemoval = ();
-	type ExistentialDeposit = ConstU128<100>;
+	type ExistentialDeposit = ConstU128<CENTS>;
 	type AccountStore = System;
 	type ReserveIdentifier = [u8; 8];
 	type RuntimeHoldReason = ();
@@ -96,7 +102,7 @@ impl pallet_balances::Config for Test {
 }
 
 impl WeightToFeeT for WeightToFee {
-	type Balance = u128;
+	type Balance = Balance;
 
 	fn weight_to_fee(weight: &Weight) -> Self::Balance {
 		Self::Balance::saturated_from(weight.ref_time())
@@ -105,7 +111,7 @@ impl WeightToFeeT for WeightToFee {
 }
 
 impl WeightToFeeT for TransactionByteFee {
-	type Balance = u128;
+	type Balance = Balance;
 
 	fn weight_to_fee(weight: &Weight) -> Self::Balance {
 		Self::Balance::saturated_from(weight.ref_time())
@@ -114,8 +120,8 @@ impl WeightToFeeT for TransactionByteFee {
 }
 
 parameter_types! {
-	pub(crate) static TipUnbalancedAmount: u128 = 0;
-	pub(crate) static FeeUnbalancedAmount: u128 = 0;
+	pub(crate) static TipUnbalancedAmount: Balance = 0;
+	pub(crate) static FeeUnbalancedAmount: Balance = 0;
 }
 
 pub struct DealWithFees;
@@ -151,6 +157,8 @@ parameter_types! {
 impl pallet_account_abstraction::Config for Test {
 	type RuntimeEvent = RuntimeEvent;
 	type RuntimeCall = RuntimeCall;
+	type Currency = Balances;
+	type ServiceFee = ConstU128<1000>;
 	type CallFilter = frame_support::traits::Everything;
 	type EIP712Name = EIP712Name;
 	type EIP712Version = EIP712Version;
@@ -159,8 +167,15 @@ impl pallet_account_abstraction::Config for Test {
 	type WeightInfo = ();
 }
 
+#[allow(unused)]
+pub(crate) fn set_balance(who: AccountId, new_free: Balance) {
+	<Test as crate::Config>::Currency::set_balance(&who, new_free);
+	assert_eq!(<Test as crate::Config>::Currency::free_balance(who), new_free);
+}
+
+
 // Build genesis storage according to the mock runtime.
-pub fn new_test_ext() -> sp_io::TestExternalities {
+pub(crate) fn new_test_ext() -> sp_io::TestExternalities {
 	frame_system::GenesisConfig::<Test>::default().build_storage().unwrap().into()
 }
 

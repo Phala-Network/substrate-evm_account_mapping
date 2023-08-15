@@ -276,6 +276,8 @@ parameter_types! {
 impl pallet_account_abstraction::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type RuntimeCall = RuntimeCall;
+	type Currency = Balances;
+	type ServiceFee = ConstU128<1000>;
 	type CallFilter = frame_support::traits::Everything;
 	type EIP712Name = EIP712Name;
 	type EIP712Version = EIP712Version;

@@ -17,6 +17,8 @@ fn it_works() {
 		let nonce: u64 = 0;
 		let signature: [u8; 65] = hex::decode("37cb6ff8e296d7e476ee13a6cfababe788217519d428fcc723b482dc97cb4d1359a8d1c020fe3cebc1d06a67e61b1f0e296739cecacc640b0ba48e8a7555472e1b").expect("Decodable").try_into().expect("Valid");
 
+		set_balance(account.clone(), 1 * DOLLARS);
+
 		// TODO: this skip validate_unsigned so the nonce will mismatch
 		// Dispatch a signed extrinsic.
 		// 0x07003d589a72aacea3f5f98494fdb5a7c3c70296b2410fa7552444d0206f61aa8e9100071448656c6c6f00000000000000008fe82b58127bdaf5090c00375181fb4152ec28af422e371d73a05b776c22f4e70aaa24e2d7604b65cfaf2fe332e6763c9cbafb59c1be7f4a0fd8cae1f3e351fb1b
@@ -26,7 +28,8 @@ fn it_works() {
 				account,
 				call_data.try_into().expect("Valid"), // Box::<RuntimeCall>::new(call),
 				nonce,
-				signature
+				signature,
+				0u128.into()
 			)
 		);
 
