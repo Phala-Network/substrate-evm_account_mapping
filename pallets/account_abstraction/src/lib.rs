@@ -421,25 +421,16 @@ pub mod pallet {
 				Ok(post_info) => post_info,
 				Err(error_and_info) => error_and_info.post_info,
 			};
-
 			// Deposit the call's result
 			Self::deposit_event(Event::CallDone { who: who.clone(), call_result });
-
-			// Should be the same as we withdrawn on `validate_unsigned`
-			// TODO: support tip
-			
 
 			let actual_fee = pallet_transaction_payment::Pallet::<T>::compute_actual_fee(
 				len as u32, &info, &post_info, tip,
 			);
-
-			// T::Currency::transfer(&owner, &worker, initial_balance, Preservation::Preserve)?;
-			// TODO: port the logic here
 			// frame/transaction-payment/src/payment.rs
 			<<T as pallet_transaction_payment::Config>::OnChargeTransaction as OnChargeTransaction<T>>::correct_and_deposit_fee(
 				&who, &info, &post_info, actual_fee, tip, already_withdrawn
 			).map_err(|_err| Error::<T>::PaymentError)?;
-
 			Self::deposit_event(Event::TransactionFeePaid { who: who.clone(), actual_fee, tip });
 
 			// TODO: need add the actual fee
