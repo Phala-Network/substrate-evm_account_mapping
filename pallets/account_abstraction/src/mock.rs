@@ -1,17 +1,18 @@
 use crate as pallet_account_abstraction;
 use frame_support::{
-	pallet_prelude::*,
 	dispatch::DispatchClass,
+	pallet_prelude::*,
 	parameter_types,
 	traits::{
-		fungible::Mutate,
-		ConstU16, ConstU32, ConstU64, ConstU128,
-		Get, Imbalance, OnUnbalanced,
+		fungible::Mutate, ConstU128, ConstU16, ConstU32, ConstU64, Get, Imbalance, OnUnbalanced,
 	},
 	weights::{Weight, WeightToFee as WeightToFeeT},
 };
-use sp_runtime::{traits::{BlakeTwo256, IdentifyAccount, IdentityLookup, Verify}, BuildStorage, MultiSignature, SaturatedConversion};
 use pallet_transaction_payment::CurrencyAdapter;
+use sp_runtime::{
+	traits::{BlakeTwo256, IdentifyAccount, IdentityLookup, Verify},
+	BuildStorage, MultiSignature, SaturatedConversion,
+};
 
 type Block = frame_system::mocking::MockBlock<Test>;
 
@@ -172,7 +173,6 @@ pub(crate) fn set_balance(who: AccountId, new_free: Balance) {
 	<Test as crate::Config>::Currency::set_balance(&who, new_free);
 	assert_eq!(<Test as crate::Config>::Currency::free_balance(who), new_free);
 }
-
 
 // Build genesis storage according to the mock runtime.
 pub(crate) fn new_test_ext() -> sp_io::TestExternalities {

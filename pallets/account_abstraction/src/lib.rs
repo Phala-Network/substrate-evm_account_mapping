@@ -31,23 +31,17 @@ macro_rules! log {
 }
 
 use frame_support::{
-	dispatch::{Dispatchable, DispatchInfo, PostDispatchInfo, GetDispatchInfo, RawOrigin},
+	dispatch::{DispatchInfo, Dispatchable, GetDispatchInfo, PostDispatchInfo, RawOrigin},
 	traits::{
-		fungible::{
-			Inspect as InspectFungible,
-			Mutate as MutateFungible,
-		},
-		tokens::{
-			WithdrawReasons, ExistenceRequirement,
-			Fortitude, Preservation
-		},
-		Currency, Contains, OriginTrait,
+		fungible::{Inspect as InspectFungible, Mutate as MutateFungible},
+		tokens::{ExistenceRequirement, Fortitude, Preservation, WithdrawReasons},
+		Contains, Currency, OriginTrait,
 	},
 	weights::Weight,
 };
-use sp_runtime::FixedPointOperand;
 use pallet_transaction_payment::OnChargeTransaction;
 use sp_runtime::traits::TrailingZeroInput;
+use sp_runtime::FixedPointOperand;
 
 type PaymentBalanceOf<T> = <<T as pallet_transaction_payment::Config>::OnChargeTransaction as OnChargeTransaction<T>>::Balance;
 
@@ -75,15 +69,20 @@ pub mod pallet {
 
 		/// The overarching call type.
 		type RuntimeCall: Parameter
-		+ Dispatchable<RuntimeOrigin = Self::RuntimeOrigin, Info = DispatchInfo, PostInfo = PostDispatchInfo>
-		+ GetDispatchInfo
-		+ codec::Decode
-		+ codec::Encode
-		+ scale_info::TypeInfo
-		+ IsType<<Self as frame_system::Config>::RuntimeCall>;
+			+ Dispatchable<
+				RuntimeOrigin = Self::RuntimeOrigin,
+				Info = DispatchInfo,
+				PostInfo = PostDispatchInfo,
+			> + GetDispatchInfo
+			+ codec::Decode
+			+ codec::Encode
+			+ scale_info::TypeInfo
+			+ IsType<<Self as frame_system::Config>::RuntimeCall>;
 
 		/// The system's currency for payment.
-		type Currency: Currency<Self::AccountId> + InspectFungible<Self::AccountId> + MutateFungible<Self::AccountId>;
+		type Currency: Currency<Self::AccountId>
+			+ InspectFungible<Self::AccountId>
+			+ MutateFungible<Self::AccountId>;
 
 		#[pallet::constant]
 		type ServiceFee: Get<BalanceOf<Self>>;
@@ -111,9 +110,19 @@ pub mod pallet {
 	#[pallet::event]
 	#[pallet::generate_deposit(pub(super) fn deposit_event)]
 	pub enum Event<T: Config> {
-		ServiceFeePaid { who: T::AccountId, fee: BalanceOf<T> },
-		TransactionFeePaid { who: T::AccountId, actual_fee: PaymentBalanceOf<T>, tip: PaymentBalanceOf<T> },
-		CallDone { who: T::AccountId, call_result: DispatchResultWithPostInfo },
+		ServiceFeePaid {
+			who: T::AccountId,
+			fee: BalanceOf<T>,
+		},
+		TransactionFeePaid {
+			who: T::AccountId,
+			actual_fee: PaymentBalanceOf<T>,
+			tip: PaymentBalanceOf<T>,
+		},
+		CallDone {
+			who: T::AccountId,
+			call_result: DispatchResultWithPostInfo,
+		},
 	}
 
 	// Errors inform users that something went wrong.
@@ -128,15 +137,17 @@ pub mod pallet {
 	}
 
 	#[pallet::storage]
-	pub(crate) type AccountNonce<T: Config> = StorageMap<_, Blake2_128Concat, T::AccountId, u64, ValueQuery>;
+	pub(crate) type AccountNonce<T: Config> =
+		StorageMap<_, Blake2_128Concat, T::AccountId, u64, ValueQuery>;
 
 	#[pallet::validate_unsigned]
 	impl<T: Config> ValidateUnsigned for Pallet<T>
 	where
 		PaymentBalanceOf<T>: Send + Sync + FixedPointOperand,
-		<T as frame_system::Config>::RuntimeCall: Dispatchable<Info = DispatchInfo, PostInfo = PostDispatchInfo>,
+		<T as frame_system::Config>::RuntimeCall:
+			Dispatchable<Info = DispatchInfo, PostInfo = PostDispatchInfo>,
 		<T as frame_system::Config>::AccountId: From<[u8; 32]> + Into<[u8; 32]>,
-		T: frame_system::Config<AccountId = sp_runtime::AccountId32>
+		T: frame_system::Config<AccountId = sp_runtime::AccountId32>,
 	{
 		type Call = Call<T>;
 
@@ -190,9 +201,10 @@ pub mod pallet {
 
 			// Check the caller
 			let public_key = recovered_key.to_encoded_point(true).to_bytes();
-			let decoded_account = T::AccountId::decode(&mut &sp_io::hashing::blake2_256(&public_key)[..]).unwrap();
+			let decoded_account =
+				T::AccountId::decode(&mut &sp_io::hashing::blake2_256(&public_key)[..]).unwrap();
 			if who != &decoded_account {
-				return Err(InvalidTransaction::BadSigner.into())
+				return Err(InvalidTransaction::BadSigner.into());
 			}
 
 			// Skip frame_system::CheckNonZeroSender
@@ -204,7 +216,7 @@ pub mod pallet {
 			// frame_system::CheckNonce<Runtime>
 			let account_nonce = AccountNonce::<T>::get(&who);
 			if nonce < &account_nonce {
-				return Err(InvalidTransaction::Stale.into())
+				return Err(InvalidTransaction::Stale.into());
 			}
 			let provides = (who, nonce).encode();
 			let requires = if &account_nonce < nonce && nonce > &0u64 {
@@ -217,13 +229,16 @@ pub mod pallet {
 					InvalidTransaction::Stale
 				} else {
 					InvalidTransaction::Future
-				}.into())
+				}
+				.into());
 			}
 			AccountNonce::<T>::insert(&who, account_nonce + 1);
 
 			// Deserialize the call
 			// TODO: Configurable upper bound?
-			let actual_call = <T as Config>::RuntimeCall::decode(&mut TrailingZeroInput::new(call_data)).or(Err(InvalidTransaction::Call))?;
+			let actual_call =
+				<T as Config>::RuntimeCall::decode(&mut TrailingZeroInput::new(call_data))
+					.or(Err(InvalidTransaction::Call))?;
 
 			// Skip frame_system::CheckWeight<Runtime>
 			// it has implemented `validate_unsigned` and `pre_dispatch_unsigned`, we don't need to do the validate here.
@@ -233,12 +248,13 @@ pub mod pallet {
 				who,
 				T::ServiceFee::get(),
 				WithdrawReasons::TRANSACTION_PAYMENT,
-				ExistenceRequirement::KeepAlive
-			).or(Err(InvalidTransaction::Payment))?;
+				ExistenceRequirement::KeepAlive,
+			)
+			.or(Err(InvalidTransaction::Payment))?;
 
 			Self::deposit_event(Event::ServiceFeePaid {
 				who: who.clone(),
-				fee: T::ServiceFee::get()
+				fee: T::ServiceFee::get(),
 			});
 
 			// pallet_transaction_payment::ChargeTransactionPayment<Runtime>
@@ -246,24 +262,29 @@ pub mod pallet {
 			let len = actual_call.encoded_size();
 			let info = actual_call.get_dispatch_info();
 			// We shall get the same `fee` later
-			let est_fee = pallet_transaction_payment::Pallet::<T>::compute_fee(len as u32, &info, tip);
+			let est_fee =
+				pallet_transaction_payment::Pallet::<T>::compute_fee(len as u32, &info, tip);
 			// We don't withdraw the fee here, because we can't cache the imbalance
 			// Instead, we check the account has enough fee
 			// I think this is a hack, or the type can't match
 			let est_fee: u128 = est_fee.try_into().or(Err(InvalidTransaction::Payment))?;
-			let usable_balance_for_fees: u128 = T::Currency::reducible_balance(who, Preservation::Protect, Fortitude::Polite).try_into().or(Err(InvalidTransaction::Payment))?;
+			let usable_balance_for_fees: u128 =
+				T::Currency::reducible_balance(who, Preservation::Protect, Fortitude::Polite)
+					.try_into()
+					.or(Err(InvalidTransaction::Payment))?;
 			if usable_balance_for_fees < est_fee {
-				return Err(InvalidTransaction::Payment.into())
+				return Err(InvalidTransaction::Payment.into());
 			}
 
 			// Calculate priority
 			// Cheat from `get_priority` in frame/transaction-payment/src/lib.rs
-			use sp_runtime::{traits::One, Saturating, SaturatedConversion};
 			use frame_support::traits::Defensive;
+			use sp_runtime::{traits::One, SaturatedConversion, Saturating};
 			// Calculate how many such extrinsics we could fit into an empty block and take the
 			// limiting factor.
 			let max_block_weight = <T as frame_system::Config>::BlockWeights::get().max_block;
-			let max_block_length = *<T as frame_system::Config>::BlockLength::get().max.get(info.class) as u64;
+			let max_block_length =
+				*<T as frame_system::Config>::BlockLength::get().max.get(info.class) as u64;
 
 			// bounded_weight is used as a divisor later so we keep it non-zero.
 			let bounded_weight = info.weight.max(Weight::from_parts(1, 1)).min(max_block_weight);
@@ -292,18 +313,15 @@ pub mod pallet {
 			let priority = scaled_tip.saturated_into::<TransactionPriority>();
 
 			// Finish the validation
-			let valid_transaction_builder =
-				ValidTransaction::with_tag_prefix("AccountAbstraction")
-					.priority(priority)
-					.and_provides(provides)
-					.longevity(5)
-					.propagate(true);
+			let valid_transaction_builder = ValidTransaction::with_tag_prefix("AccountAbstraction")
+				.priority(priority)
+				.and_provides(provides)
+				.longevity(5)
+				.propagate(true);
 			let Some(requires) = requires else {
 				return valid_transaction_builder.build()
 			};
-			valid_transaction_builder
-				.and_requires(requires)
-				.build()
+			valid_transaction_builder.and_requires(requires).build()
 		}
 	}
 
@@ -311,7 +329,8 @@ pub mod pallet {
 	impl<T: Config> Pallet<T>
 	where
 		PaymentBalanceOf<T>: FixedPointOperand,
-		<T as frame_system::Config>::RuntimeCall: Dispatchable<Info = DispatchInfo, PostInfo = PostDispatchInfo>,
+		<T as frame_system::Config>::RuntimeCall:
+			Dispatchable<Info = DispatchInfo, PostInfo = PostDispatchInfo>,
 		T: frame_system::Config<AccountId = sp_runtime::AccountId32>,
 	{
 		/// Meta-transaction from EVM compatible chains
@@ -336,7 +355,7 @@ pub mod pallet {
 			call_data: BoundedVec<u8, ConstU32<2048>>,
 			nonce: u64,
 			signature: [u8; 65],
-			tip: Option<PaymentBalanceOf<T>>
+			tip: Option<PaymentBalanceOf<T>>,
 		) -> DispatchResultWithPostInfo {
 			use sp_io::hashing::{blake2_256, keccak_256};
 
@@ -382,19 +401,18 @@ pub mod pallet {
 
 			// Deserialize the caller
 			let decoded_account = T::AccountId::decode(&mut &blake2_256(&public_key)[..]).unwrap();
-			ensure!(
-				decoded_account == who,
-				Error::<T>::AccountMismatch
-			);
+			ensure!(decoded_account == who, Error::<T>::AccountMismatch);
 
 			// Call
 			let mut origin: T::RuntimeOrigin = RawOrigin::Signed(who.clone()).into();
 			origin.add_filter(T::CallFilter::contains);
-			let call = <T as Config>::RuntimeCall::decode(&mut TrailingZeroInput::new(&call_data)).or(Err(Error::<T>::DecodeError))?;
+			let call = <T as Config>::RuntimeCall::decode(&mut TrailingZeroInput::new(&call_data))
+				.or(Err(Error::<T>::DecodeError))?;
 			let len = call.encoded_size();
 			let info = call.get_dispatch_info();
 			let tip = tip.unwrap_or(0u32.into());
-			let est_fee = pallet_transaction_payment::Pallet::<T>::compute_fee(len as u32, &info, tip);
+			let est_fee =
+				pallet_transaction_payment::Pallet::<T>::compute_fee(len as u32, &info, tip);
 			let already_withdrawn =
 				<<T as pallet_transaction_payment::Config>::OnChargeTransaction as OnChargeTransaction<T>>::withdraw_fee(&who, &call.clone().into(), &info, est_fee, tip).map_err(|_err| Error::<T>::PaymentError)?;
 
@@ -405,17 +423,15 @@ pub mod pallet {
 			};
 
 			// Deposit the call's result
-			Self::deposit_event(Event::CallDone {
-				who: who.clone(),
-				call_result,
-			});
+			Self::deposit_event(Event::CallDone { who: who.clone(), call_result });
 
 			// Should be the same as we withdrawn on `validate_unsigned`
 			// TODO: support tip
 			use sp_runtime::SaturatedConversion;
 
-
-			let actual_fee = pallet_transaction_payment::Pallet::<T>::compute_actual_fee(len as u32, &info, &post_info, tip);
+			let actual_fee = pallet_transaction_payment::Pallet::<T>::compute_actual_fee(
+				len as u32, &info, &post_info, tip,
+			);
 
 			// T::Currency::transfer(&owner, &worker, initial_balance, Preservation::Preserve)?;
 			// TODO: port the logic here
@@ -424,11 +440,7 @@ pub mod pallet {
 				&who, &info, &post_info, actual_fee, tip, already_withdrawn
 			).map_err(|_err| Error::<T>::PaymentError)?;
 
-			Self::deposit_event(Event::TransactionFeePaid {
-				who: who.clone(),
-				actual_fee,
-				tip
-			});
+			Self::deposit_event(Event::TransactionFeePaid { who: who.clone(), actual_fee, tip });
 
 			// TODO: need add the actual fee
 			call_result
@@ -436,19 +448,21 @@ pub mod pallet {
 	}
 
 	impl<T: Config> Pallet<T> {
-		pub(crate) fn ecdsa_recover_public_key(signature: &[u8], message: &[u8]) -> Option<k256::ecdsa::VerifyingKey> {
+		pub(crate) fn ecdsa_recover_public_key(
+			signature: &[u8],
+			message: &[u8],
+		) -> Option<k256::ecdsa::VerifyingKey> {
 			use k256::ecdsa::{RecoveryId, Signature, VerifyingKey};
 
-			let rid = RecoveryId::try_from(
-				if signature[64] > 26 { signature[64] - 27 } else { signature[64] }
-			).ok()?;
+			let rid = RecoveryId::try_from(if signature[64] > 26 {
+				signature[64] - 27
+			} else {
+				signature[64]
+			})
+			.ok()?;
 			let sig = Signature::from_slice(&signature[..64]).ok()?;
 
-			VerifyingKey::recover_from_prehash(
-				message,
-				&sig,
-				rid
-			).ok()
+			VerifyingKey::recover_from_prehash(message, &sig, rid).ok()
 		}
 	}
 }

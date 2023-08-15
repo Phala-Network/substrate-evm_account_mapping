@@ -1,10 +1,10 @@
 #[allow(unused)]
 use crate::{mock::*, Error, Event};
+use codec::Decode;
 use frame_support::{assert_noop, assert_ok};
+use k256::ecdsa::signature;
 use sp_core::crypto::Ss58Codec;
 use sp_runtime::traits::TrailingZeroInput;
-use codec::Decode;
-use k256::ecdsa::signature;
 
 #[test]
 fn it_works() {
@@ -43,7 +43,13 @@ fn eip712() {
 	let eip712_name = b"Substrate".to_vec();
 	let eip712_version = b"1".to_vec();
 	let eip712_chain_id: crate::EIP712ChainID = sp_core::U256::from(0);
-	let eip712_verifying_contract_address: crate::EIP712VerifyingContractAddress = TryInto::<[u8; 20]>::try_into(hex::decode("0000000000000000000000000000000000000000").expect("Decodable")).expect("Decodable").try_into().expect("Decodable");
+	let eip712_verifying_contract_address: crate::EIP712VerifyingContractAddress =
+		TryInto::<[u8; 20]>::try_into(
+			hex::decode("0000000000000000000000000000000000000000").expect("Decodable"),
+		)
+		.expect("Decodable")
+		.try_into()
+		.expect("Decodable");
 
 	let eip712_domain = crate::eip712::EIP712Domain {
 		name: eip712_name,
@@ -59,7 +65,8 @@ fn eip712() {
 	);
 	// Token::Uint(U256::from(keccak_256(&self.name)))
 	let who = "5DT96geTS2iLpkH8fAhYAAphNpxddKCV36s5ShVFavf1xQiF";
-	let call_data = sp_io::hashing::keccak_256(&hex::decode("00071448656c6c6f").expect("Decodable"));
+	let call_data =
+		sp_io::hashing::keccak_256(&hex::decode("00071448656c6c6f").expect("Decodable"));
 	let nonce = 0u64;
 	let message_hash = sp_io::hashing::keccak_256(&ethabi::encode(&[
 		ethabi::Token::FixedBytes(type_hash.to_vec()),
@@ -81,25 +88,20 @@ fn eip712() {
 	let signature: [u8; 65] = hex::decode("37cb6ff8e296d7e476ee13a6cfababe788217519d428fcc723b482dc97cb4d1359a8d1c020fe3cebc1d06a67e61b1f0e296739cecacc640b0ba48e8a7555472e1b").expect("Decodable").try_into().expect("Decodable");
 
 	use k256::ecdsa::{RecoveryId, Signature, VerifyingKey};
-	let rid = RecoveryId::try_from(
-		if signature[64] > 26 { signature[64] - 27 } else { signature[64] }
-	).unwrap();
+	let rid =
+		RecoveryId::try_from(if signature[64] > 26 { signature[64] - 27 } else { signature[64] })
+			.unwrap();
 	let sig = Signature::from_slice(&signature[..64]).unwrap();
 
-	let recovered_key = VerifyingKey::recover_from_prehash(
-		&signing_message,
-		&sig,
-		rid
-	).unwrap();
+	let recovered_key = VerifyingKey::recover_from_prehash(&signing_message, &sig, rid).unwrap();
 
 	let public_key = recovered_key.to_encoded_point(true);
 	println!("0x{}", hex::encode(&public_key));
 
-	let decoded_account = AccountId::decode(&mut &sp_io::hashing::blake2_256(&public_key.to_bytes())[..]).expect("Decodable");
-	assert_eq!(
-		decoded_account.to_ss58check(),
-		who
-	);
+	let decoded_account =
+		AccountId::decode(&mut &sp_io::hashing::blake2_256(&public_key.to_bytes())[..])
+			.expect("Decodable");
+	assert_eq!(decoded_account.to_ss58check(), who);
 
 	// let recovered_eth_public_key = sp_io::crypto::secp256k1_ecdsa_recover(&signature, &signing_message).ok().expect("Recoverable");
 	// // panic!("{}", hex::encode(recovered_eth_public_key));
