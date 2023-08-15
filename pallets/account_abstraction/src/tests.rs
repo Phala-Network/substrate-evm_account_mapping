@@ -4,7 +4,7 @@ use codec::Decode;
 use frame_support::{assert_ok};
 
 use sp_core::crypto::Ss58Codec;
-
+use sp_runtime::traits::TrailingZeroInput;
 
 #[test]
 fn it_works() {
@@ -12,8 +12,8 @@ fn it_works() {
 		run_to_block(1);
 
 		let account = AccountId::from_ss58check("5DT96geTS2iLpkH8fAhYAAphNpxddKCV36s5ShVFavf1xQiF").unwrap();
-		let call_data = hex::decode("00071448656c6c6f").expect("Valid");
-		// let call = RuntimeCall::decode(&mut TrailingZeroInput::new(&call_data)).expect("Valid");
+		let call_data = hex::decode("00071448656c6c6f").expect("Valid"); // system.remarkWithEvent("Hello")
+		let call = RuntimeCall::decode(&mut TrailingZeroInput::new(&call_data)).expect("Valid");
 		let nonce: u64 = 0;
 		let signature: [u8; 65] = hex::decode("37cb6ff8e296d7e476ee13a6cfababe788217519d428fcc723b482dc97cb4d1359a8d1c020fe3cebc1d06a67e61b1f0e296739cecacc640b0ba48e8a7555472e1b").expect("Decodable").try_into().expect("Valid");
 
@@ -26,7 +26,7 @@ fn it_works() {
 			AccountAbstraction::remote_call_from_evm_chain(
 				RuntimeOrigin::none(),
 				account,
-				call_data.try_into().expect("Valid"), // Box::<RuntimeCall>::new(call),
+				Box::<RuntimeCall>::new(call),
 				nonce,
 				signature,
 				0u128.into()

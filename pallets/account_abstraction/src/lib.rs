@@ -40,7 +40,6 @@ use frame_support::{
 	weights::Weight,
 };
 use pallet_transaction_payment::OnChargeTransaction;
-use sp_runtime::traits::TrailingZeroInput;
 use sp_runtime::FixedPointOperand;
 
 type PaymentBalanceOf<T> = <<T as pallet_transaction_payment::Config>::OnChargeTransaction as OnChargeTransaction<T>>::Balance;
@@ -154,20 +153,21 @@ pub mod pallet {
 	{
 		type Call = Call<T>;
 
-		fn validate_unsigned(_source: TransactionSource, call: &Self::Call) -> TransactionValidity {
+		fn validate_unsigned(_source: TransactionSource, unsigned_call: &Self::Call) -> TransactionValidity {
 			// Only allow `remote_call_from_evm_chain`
 			let Call::remote_call_from_evm_chain {
 				ref who,
-				ref call_data,
+				ref call,
 				ref nonce,
 				ref signature,
 				ref tip,
-			} = call else {
+			} = unsigned_call else {
 				return Err(InvalidTransaction::Call.into())
 			};
 
 			// Check the signature and get the public key
-			let message_hash = Self::eip712_message_hash(who.clone(), call_data, *nonce);
+			let call_data = <T as Config>::RuntimeCall::encode(&call);
+			let message_hash = Self::eip712_message_hash(who.clone(), &call_data, *nonce);
 			let Some(recovered_key) = Pallet::<T>::ecdsa_recover_public_key(signature, &message_hash) else {
 				return Err(InvalidTransaction::BadProof.into())
 			};
@@ -207,12 +207,6 @@ pub mod pallet {
 			}
 			AccountNonce::<T>::insert(who, account_nonce + 1);
 
-			// Deserialize the call
-			// TODO: Configurable upper bound?
-			let actual_call =
-				<T as Config>::RuntimeCall::decode(&mut TrailingZeroInput::new(call_data))
-					.or(Err(InvalidTransaction::Call))?;
-
 			// Skip frame_system::CheckWeight<Runtime>
 			// it has implemented `validate_unsigned` and `pre_dispatch_unsigned`, we don't need to do the validate here.
 
@@ -232,8 +226,8 @@ pub mod pallet {
 
 			// pallet_transaction_payment::ChargeTransactionPayment<Runtime>
 			let tip = tip.unwrap_or(0u32.into());
-			let len = actual_call.encoded_size();
-			let info = actual_call.get_dispatch_info();
+			let len = call.encoded_size();
+			let info = call.get_dispatch_info();
 			// We shall get the same `fee` later
 			let est_fee =
 				pallet_transaction_payment::Pallet::<T>::compute_fee(len as u32, &info, tip);
@@ -309,23 +303,17 @@ pub mod pallet {
 		/// Meta-transaction from EVM compatible chains
 		#[pallet::call_index(0)]
 		#[pallet::weight({
-			let call = <T as Config>::RuntimeCall::decode(&mut TrailingZeroInput::new(call_data)).or(Err(Error::<T>::DecodeError));
-			if let Ok(call) = call {
-				let di = call.get_dispatch_info();
-				// TODO: benchmarking here
-				(
-					Weight::zero().saturating_add(di.weight),
-					di.class
-				)
-			} else {
-				// TODO: benchmarking here
-				(Weight::zero(), DispatchClass::Normal)
-			}
+			let di = call.get_dispatch_info();
+			// TODO: benchmarking here
+			(
+				Weight::zero().saturating_add(di.weight),
+				di.class
+			)
 		})]
 		pub fn remote_call_from_evm_chain(
 			origin: OriginFor<T>,
 			who: T::AccountId,
-			call_data: BoundedVec<u8, ConstU32<2048>>,
+			call: Box<<T as Config>::RuntimeCall>,
 			nonce: Nonce,
 			signature: [u8; 65],
 			tip: Option<PaymentBalanceOf<T>>,
@@ -336,6 +324,7 @@ pub mod pallet {
 			ensure_none(origin)?;
 
 			// Verify the signature and get the public key
+			let call_data = <T as Config>::RuntimeCall::encode(&call);
 			let message_hash = Self::eip712_message_hash(who.clone(), &call_data, nonce);
 			let Some(recovered_key) = Self::ecdsa_recover_public_key(&signature, &message_hash) else {
 				return Err(Error::<T>::InvalidSignature.into())
@@ -349,15 +338,13 @@ pub mod pallet {
 			// Call
 			let mut origin: T::RuntimeOrigin = RawOrigin::Signed(who.clone()).into();
 			origin.add_filter(T::CallFilter::contains);
-			let call = <T as Config>::RuntimeCall::decode(&mut TrailingZeroInput::new(&call_data))
-				.or(Err(Error::<T>::DecodeError))?;
 			let len = call.encoded_size();
 			let info = call.get_dispatch_info();
 			let tip = tip.unwrap_or(0u32.into());
 			let est_fee =
 				pallet_transaction_payment::Pallet::<T>::compute_fee(len as u32, &info, tip);
 			let already_withdrawn =
-				<<T as pallet_transaction_payment::Config>::OnChargeTransaction as OnChargeTransaction<T>>::withdraw_fee(&who, &call.clone().into(), &info, est_fee, tip).map_err(|_err| Error::<T>::PaymentError)?;
+				<<T as pallet_transaction_payment::Config>::OnChargeTransaction as OnChargeTransaction<T>>::withdraw_fee(&who, &(*call).clone().into(), &info, est_fee, tip).map_err(|_err| Error::<T>::PaymentError)?;
 
 			let call_result = call.dispatch(origin);
 			let post_info = match call_result {
@@ -403,7 +390,7 @@ pub mod pallet {
 
 		pub(crate) fn eip712_message_hash(
 			who: T::AccountId,
-			call_data: &BoundedVec<u8, ConstU32<2048>>,
+			call_data: &Vec<u8>,
 			nonce: Nonce
 		) -> Keccak256Signature {
 			// TODO: will refactor this in Kevin's way for performance.
