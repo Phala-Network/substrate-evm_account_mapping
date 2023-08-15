@@ -51,6 +51,9 @@ type BalanceOf<T> =
 pub type EIP712ChainID = sp_core::U256;
 pub type EIP712VerifyingContractAddress = sp_core::H160;
 
+pub type Nonce = u64;
+pub type Keccak256Signature = [u8; 32];
+
 #[frame_support::pallet]
 pub mod pallet {
 	use super::*;
@@ -163,38 +166,8 @@ pub mod pallet {
 				return Err(InvalidTransaction::Call.into())
 			};
 
-			// Check the signature
-			let eip712_domain = crate::eip712::EIP712Domain {
-				name: T::EIP712Name::get(),
-				version: T::EIP712Version::get(),
-				chain_id: T::EIP712ChainID::get(),
-				verifying_contract: T::EIP712VerifyingContractAddress::get(),
-				salt: None,
-			};
-			let domain_separator = eip712_domain.separator();
-
-			let type_hash = sp_io::hashing::keccak_256(
-				"SubstrateCall(string who,bytes callData,uint64 nonce)".as_bytes(),
-			);
-			// Token::Uint(U256::from(keccak_256(&self.name)))
-			use sp_core::crypto::Ss58Codec;
-			let ss58_who = who.to_ss58check();
-			let hashed_call_data = sp_io::hashing::keccak_256(call_data);
-			let message_hash = sp_io::hashing::keccak_256(&ethabi::encode(&[
-				ethabi::Token::FixedBytes(type_hash.to_vec()),
-				ethabi::Token::FixedBytes(sp_io::hashing::keccak_256(ss58_who.as_bytes()).to_vec()),
-				ethabi::Token::FixedBytes(hashed_call_data.to_vec()),
-				ethabi::Token::Uint((*nonce).into()),
-			]));
-
-			let typed_data_hash_input = &vec![
-				crate::encode::SolidityDataType::String("\x19\x01"),
-				crate::encode::SolidityDataType::Bytes(&domain_separator),
-				crate::encode::SolidityDataType::Bytes(&message_hash),
-			];
-			let bytes = crate::encode::abi::encode_packed(typed_data_hash_input);
-			let message_hash = sp_io::hashing::keccak_256(bytes.as_slice());
-
+			// Check the signature and get the public key
+			let message_hash = Self::eip712_message_hash(who.clone(), &call_data, *nonce);
 			let Some(recovered_key) = Pallet::<T>::ecdsa_recover_public_key(signature, &message_hash) else {
 				return Err(InvalidTransaction::BadProof.into())
 			};
@@ -353,7 +326,7 @@ pub mod pallet {
 			origin: OriginFor<T>,
 			who: T::AccountId,
 			call_data: BoundedVec<u8, ConstU32<2048>>,
-			nonce: u64,
+			nonce: Nonce,
 			signature: [u8; 65],
 			tip: Option<PaymentBalanceOf<T>>,
 		) -> DispatchResultWithPostInfo {
@@ -362,38 +335,8 @@ pub mod pallet {
 			// This is an unsigned transaction
 			ensure_none(origin)?;
 
-			// Verify the signature
-			let eip712_domain = crate::eip712::EIP712Domain {
-				name: T::EIP712Name::get(),
-				version: T::EIP712Version::get(),
-				chain_id: T::EIP712ChainID::get(),
-				verifying_contract: T::EIP712VerifyingContractAddress::get(),
-				salt: None,
-			};
-			let domain_separator = eip712_domain.separator();
-
-			let type_hash = sp_io::hashing::keccak_256(
-				"SubstrateCall(string who,bytes callData,uint64 nonce)".as_bytes(),
-			);
-			// Token::Uint(U256::from(keccak_256(&self.name)))
-			use sp_core::crypto::Ss58Codec;
-			let ss58_who = who.to_ss58check();
-			let hashed_call_data = sp_io::hashing::keccak_256(&call_data);
-			let message_hash = sp_io::hashing::keccak_256(&ethabi::encode(&[
-				ethabi::Token::FixedBytes(type_hash.to_vec()),
-				ethabi::Token::FixedBytes(sp_io::hashing::keccak_256(ss58_who.as_bytes()).to_vec()),
-				ethabi::Token::FixedBytes(hashed_call_data.to_vec()),
-				ethabi::Token::Uint(nonce.into()),
-			]));
-
-			let typed_data_hash_input = &vec![
-				crate::encode::SolidityDataType::String("\x19\x01"),
-				crate::encode::SolidityDataType::Bytes(&domain_separator),
-				crate::encode::SolidityDataType::Bytes(&message_hash),
-			];
-			let bytes = crate::encode::abi::encode_packed(typed_data_hash_input);
-			let message_hash = sp_io::hashing::keccak_256(bytes.as_slice());
-
+			// Verify the signature and get the public key
+			let message_hash = Self::eip712_message_hash(who.clone(), &call_data, nonce);
 			let Some(recovered_key) = Self::ecdsa_recover_public_key(&signature, &message_hash) else {
 				return Err(Error::<T>::InvalidSignature.into())
 			};
@@ -438,7 +381,10 @@ pub mod pallet {
 		}
 	}
 
-	impl<T: Config> Pallet<T> {
+	impl<T: Config> Pallet<T>
+	where
+		T: frame_system::Config<AccountId = sp_runtime::AccountId32>,
+	{
 		pub(crate) fn ecdsa_recover_public_key(
 			signature: &[u8],
 			message: &[u8],
@@ -454,6 +400,44 @@ pub mod pallet {
 			let sig = Signature::from_slice(&signature[..64]).ok()?;
 
 			VerifyingKey::recover_from_prehash(message, &sig, rid).ok()
+		}
+
+		pub(crate) fn eip712_message_hash(
+			who: T::AccountId,
+			call_data: &BoundedVec<u8, ConstU32<2048>>,
+			nonce: Nonce
+		) -> Keccak256Signature {
+			// TODO: will refactor this in Kevin's way for performance.
+			let eip712_domain = crate::eip712::EIP712Domain {
+				name: T::EIP712Name::get(),
+				version: T::EIP712Version::get(),
+				chain_id: T::EIP712ChainID::get(),
+				verifying_contract: T::EIP712VerifyingContractAddress::get(),
+				salt: None,
+			};
+			let domain_separator = eip712_domain.separator();
+
+			let type_hash = sp_io::hashing::keccak_256(
+				"SubstrateCall(string who,bytes callData,uint64 nonce)".as_bytes(),
+			);
+			// Token::Uint(U256::from(keccak_256(&self.name)))
+			use sp_core::crypto::Ss58Codec;
+			let ss58_who = who.to_ss58check_with_version(T::SS58Prefix::get().into());
+			let hashed_call_data = sp_io::hashing::keccak_256(&call_data);
+			let message_hash = sp_io::hashing::keccak_256(&ethabi::encode(&[
+				ethabi::Token::FixedBytes(type_hash.to_vec()),
+				ethabi::Token::FixedBytes(sp_io::hashing::keccak_256(ss58_who.as_bytes()).to_vec()),
+				ethabi::Token::FixedBytes(hashed_call_data.to_vec()),
+				ethabi::Token::Uint(nonce.into()),
+			]));
+
+			let typed_data_hash_input = &vec![
+				crate::encode::SolidityDataType::String("\x19\x01"),
+				crate::encode::SolidityDataType::Bytes(&domain_separator),
+				crate::encode::SolidityDataType::Bytes(&message_hash),
+			];
+			let bytes = crate::encode::abi::encode_packed(typed_data_hash_input);
+			sp_io::hashing::keccak_256(bytes.as_slice())
 		}
 	}
 }
