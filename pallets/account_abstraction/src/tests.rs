@@ -1,7 +1,7 @@
 #[allow(unused)]
 use crate::{mock::*, Error, Event};
 use codec::Decode;
-use frame_support::{assert_ok};
+use frame_support::assert_ok;
 
 use sp_core::crypto::Ss58Codec;
 use sp_runtime::traits::TrailingZeroInput;
@@ -88,7 +88,10 @@ fn eip712() {
 	let signature: [u8; 65] = hex::decode("37cb6ff8e296d7e476ee13a6cfababe788217519d428fcc723b482dc97cb4d1359a8d1c020fe3cebc1d06a67e61b1f0e296739cecacc640b0ba48e8a7555472e1b").expect("Decodable").try_into().expect("Decodable");
 
 	// Check the signature and get the public key
-	let recovered_public_key = sp_io::crypto::secp256k1_ecdsa_recover_compressed(&signature, &signing_message).ok().expect("Recoverable");
+	let recovered_public_key =
+		sp_io::crypto::secp256k1_ecdsa_recover_compressed(&signature, &signing_message)
+			.ok()
+			.expect("Recoverable");
 	println!("0x{}", hex::encode(recovered_public_key));
 
 	let decoded_account =

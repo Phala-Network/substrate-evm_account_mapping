@@ -153,7 +153,10 @@ pub mod pallet {
 	{
 		type Call = Call<T>;
 
-		fn validate_unsigned(_source: TransactionSource, unsigned_call: &Self::Call) -> TransactionValidity {
+		fn validate_unsigned(
+			_source: TransactionSource,
+			unsigned_call: &Self::Call,
+		) -> TransactionValidity {
 			// Only allow `remote_call_from_evm_chain`
 			let Call::remote_call_from_evm_chain {
 				ref who,
@@ -161,22 +164,26 @@ pub mod pallet {
 				ref nonce,
 				ref signature,
 				ref tip,
-			} = unsigned_call else {
+			} = unsigned_call
+			else {
 				return Err(InvalidTransaction::Call.into())
 			};
 
 			// Check the signature and get the public key
 			let call_data = <T as Config>::RuntimeCall::encode(call);
 			let message_hash = Self::eip712_message_hash(who.clone(), &call_data, *nonce);
-			let Ok(recovered_public_key) = sp_io::crypto::secp256k1_ecdsa_recover_compressed(signature, &message_hash) else {
-				return Err(InvalidTransaction::BadProof.into());
+			let Ok(recovered_public_key) =
+				sp_io::crypto::secp256k1_ecdsa_recover_compressed(signature, &message_hash)
+			else {
+				return Err(InvalidTransaction::BadProof.into())
 			};
 
 			// Deserialize the actual caller
 			let decoded_account =
-				T::AccountId::decode(&mut &sp_io::hashing::blake2_256(&recovered_public_key)[..]).unwrap();
+				T::AccountId::decode(&mut &sp_io::hashing::blake2_256(&recovered_public_key)[..])
+					.unwrap();
 			if who != &decoded_account {
-				return Err(InvalidTransaction::BadSigner.into());
+				return Err(InvalidTransaction::BadSigner.into())
 			}
 
 			// Skip frame_system::CheckNonZeroSender
@@ -188,7 +195,7 @@ pub mod pallet {
 			// frame_system::CheckNonce<Runtime>
 			let account_nonce = AccountNonce::<T>::get(who);
 			if nonce < &account_nonce {
-				return Err(InvalidTransaction::Stale.into());
+				return Err(InvalidTransaction::Stale.into())
 			}
 			let provides = (who, nonce).encode();
 			let requires = if &account_nonce < nonce && nonce > &0u64 {
@@ -202,12 +209,13 @@ pub mod pallet {
 				} else {
 					InvalidTransaction::Future
 				}
-				.into());
+				.into())
 			}
 			AccountNonce::<T>::insert(who, account_nonce + 1);
 
 			// Skip frame_system::CheckWeight<Runtime>
-			// it has implemented `validate_unsigned` and `pre_dispatch_unsigned`, we don't need to do the validate here.
+			// it has implemented `validate_unsigned` and `pre_dispatch_unsigned`, we don't need to
+			// do the validate here.
 
 			// Before we check payment, we let the account pay the service fee
 			T::Currency::withdraw(
@@ -239,7 +247,7 @@ pub mod pallet {
 					.try_into()
 					.or(Err(InvalidTransaction::Payment))?;
 			if usable_balance_for_fees < est_fee {
-				return Err(InvalidTransaction::Payment.into());
+				return Err(InvalidTransaction::Payment.into())
 			}
 
 			// Calculate priority
@@ -256,7 +264,8 @@ pub mod pallet {
 			let bounded_weight = info.weight.max(Weight::from_parts(1, 1)).min(max_block_weight);
 			let bounded_length = (len as u64).clamp(1, max_block_length);
 
-			// returns the scarce resource, i.e. the one that is limiting the number of transactions.
+			// returns the scarce resource, i.e. the one that is limiting the number of
+			// transactions.
 			let max_tx_per_block_weight = max_block_weight
 				.checked_div_per_component(&bounded_weight)
 				.defensive_proof("bounded_weight is non-zero; qed")
@@ -264,8 +273,9 @@ pub mod pallet {
 			let max_tx_per_block_length = max_block_length / bounded_length;
 			// Given our current knowledge this value is going to be in a reasonable range - i.e.
 			// less than 10^9 (2^30), so multiplying by the `tip` value is unlikely to overflow the
-			// balance type. We still use saturating ops obviously, but the point is to end up with some
-			// `priority` distribution instead of having all transactions saturate the priority.
+			// balance type. We still use saturating ops obviously, but the point is to end up with
+			// some `priority` distribution instead of having all transactions saturate the
+			// priority.
 			let max_tx_per_block = max_tx_per_block_length
 				.min(max_tx_per_block_weight)
 				.saturated_into::<PaymentBalanceOf<T>>();
@@ -284,9 +294,7 @@ pub mod pallet {
 				.and_provides(provides)
 				.longevity(5)
 				.propagate(true);
-			let Some(requires) = requires else {
-				return valid_transaction_builder.build()
-			};
+			let Some(requires) = requires else { return valid_transaction_builder.build() };
 			valid_transaction_builder.and_requires(requires).build()
 		}
 	}
@@ -317,7 +325,7 @@ pub mod pallet {
 			signature: [u8; 65],
 			tip: Option<PaymentBalanceOf<T>>,
 		) -> DispatchResult {
-			use sp_io::hashing::{blake2_256};
+			use sp_io::hashing::blake2_256;
 
 			// This is an unsigned transaction
 			ensure_none(origin)?;
@@ -325,8 +333,10 @@ pub mod pallet {
 			// Verify the signature and get the public key
 			let call_data = <T as Config>::RuntimeCall::encode(&call);
 			let message_hash = Self::eip712_message_hash(who.clone(), &call_data, nonce);
-			let Ok(recovered_public_key) = sp_io::crypto::secp256k1_ecdsa_recover_compressed(&signature, &message_hash) else {
-				return Err(Error::<T>::InvalidSignature.into());
+			let Ok(recovered_public_key) =
+				sp_io::crypto::secp256k1_ecdsa_recover_compressed(&signature, &message_hash)
+			else {
+				return Err(Error::<T>::InvalidSignature.into())
 			};
 
 			// Deserialize the actual caller
@@ -373,7 +383,7 @@ pub mod pallet {
 		pub(crate) fn eip712_message_hash(
 			who: T::AccountId,
 			call_data: &[u8],
-			nonce: Nonce
+			nonce: Nonce,
 		) -> Keccak256Signature {
 			// TODO: will refactor this in Kevin's way for performance.
 			let eip712_domain = crate::eip712::EIP712Domain {

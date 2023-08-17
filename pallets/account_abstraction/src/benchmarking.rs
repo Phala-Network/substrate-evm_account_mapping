@@ -22,23 +22,21 @@ mod benchmarks {
 
 	#[benchmark]
 	fn remote_call_from_evm_chain() -> Result<(), BenchmarkError> {
-		let account = T::AccountId::from_ss58check("5DT96geTS2iLpkH8fAhYAAphNpxddKCV36s5ShVFavf1xQiF").unwrap();
+		let account =
+			T::AccountId::from_ss58check("5DT96geTS2iLpkH8fAhYAAphNpxddKCV36s5ShVFavf1xQiF")
+				.unwrap();
 		let call_data = hex::decode("00071448656c6c6f").expect("Valid"); // system.remarkWithEvent("Hello")
-		let call = <T as frame_system::Config>::RuntimeCall::decode(&mut TrailingZeroInput::new(&call_data)).expect("Valid");
+		let call = <T as frame_system::Config>::RuntimeCall::decode(&mut TrailingZeroInput::new(
+			&call_data,
+		))
+		.expect("Valid");
 		let nonce: u64 = 0;
 		let signature: [u8; 65] = hex::decode("37cb6ff8e296d7e476ee13a6cfababe788217519d428fcc723b482dc97cb4d1359a8d1c020fe3cebc1d06a67e61b1f0e296739cecacc640b0ba48e8a7555472e1b").expect("Decodable").try_into().expect("Valid");
 
 		T::Currency::make_free_balance_be(&account, BalanceOf::<T>::max_value() / 2u32.into());
 
 		#[extrinsic_call]
-		_(
-			RawOrigin::None,
-			account,
-			Box::new(call.into()),
-			nonce,
-			signature,
-			None,
-		);
+		_(RawOrigin::None, account, Box::new(call.into()), nonce, signature, None);
 
 		Ok(())
 	}
