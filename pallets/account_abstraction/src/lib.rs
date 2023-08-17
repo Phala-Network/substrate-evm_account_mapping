@@ -166,16 +166,15 @@ pub mod pallet {
 			};
 
 			// Check the signature and get the public key
-			let call_data = <T as Config>::RuntimeCall::encode(&call);
+			let call_data = <T as Config>::RuntimeCall::encode(call);
 			let message_hash = Self::eip712_message_hash(who.clone(), &call_data, *nonce);
-			let Some(recovered_key) = Pallet::<T>::ecdsa_recover_public_key(signature, &message_hash) else {
-				return Err(InvalidTransaction::BadProof.into())
+			let Ok(recovered_public_key) = sp_io::crypto::secp256k1_ecdsa_recover_compressed(signature, &message_hash) else {
+				return Err(InvalidTransaction::BadProof.into());
 			};
 
-			// Check the caller
-			let public_key = recovered_key.to_encoded_point(true).to_bytes();
+			// Deserialize the actual caller
 			let decoded_account =
-				T::AccountId::decode(&mut &sp_io::hashing::blake2_256(&public_key)[..]).unwrap();
+				T::AccountId::decode(&mut &sp_io::hashing::blake2_256(&recovered_public_key)[..]).unwrap();
 			if who != &decoded_account {
 				return Err(InvalidTransaction::BadSigner.into());
 			}
@@ -326,13 +325,13 @@ pub mod pallet {
 			// Verify the signature and get the public key
 			let call_data = <T as Config>::RuntimeCall::encode(&call);
 			let message_hash = Self::eip712_message_hash(who.clone(), &call_data, nonce);
-			let Some(recovered_key) = Self::ecdsa_recover_public_key(&signature, &message_hash) else {
-				return Err(Error::<T>::InvalidSignature.into())
+			let Ok(recovered_public_key) = sp_io::crypto::secp256k1_ecdsa_recover_compressed(&signature, &message_hash) else {
+				return Err(Error::<T>::InvalidSignature.into());
 			};
-			let public_key = recovered_key.to_encoded_point(true).to_bytes();
 
-			// Deserialize the caller
-			let decoded_account = T::AccountId::decode(&mut &blake2_256(&public_key)[..]).unwrap();
+			// Deserialize the actual caller
+			let decoded_account =
+				T::AccountId::decode(&mut &blake2_256(&recovered_public_key)[..]).unwrap();
 			ensure!(decoded_account == who, Error::<T>::AccountMismatch);
 
 			// Call
@@ -371,26 +370,9 @@ pub mod pallet {
 	where
 		T: frame_system::Config<AccountId = sp_runtime::AccountId32>,
 	{
-		pub(crate) fn ecdsa_recover_public_key(
-			signature: &[u8],
-			message: &[u8],
-		) -> Option<k256::ecdsa::VerifyingKey> {
-			use k256::ecdsa::{RecoveryId, Signature, VerifyingKey};
-
-			let rid = RecoveryId::try_from(if signature[64] > 26 {
-				signature[64] - 27
-			} else {
-				signature[64]
-			})
-			.ok()?;
-			let sig = Signature::from_slice(&signature[..64]).ok()?;
-
-			VerifyingKey::recover_from_prehash(message, &sig, rid).ok()
-		}
-
 		pub(crate) fn eip712_message_hash(
 			who: T::AccountId,
-			call_data: &Vec<u8>,
+			call_data: &[u8],
 			nonce: Nonce
 		) -> Keccak256Signature {
 			// TODO: will refactor this in Kevin's way for performance.

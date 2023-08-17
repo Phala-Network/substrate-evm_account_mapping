@@ -87,58 +87,12 @@ fn eip712() {
 
 	let signature: [u8; 65] = hex::decode("37cb6ff8e296d7e476ee13a6cfababe788217519d428fcc723b482dc97cb4d1359a8d1c020fe3cebc1d06a67e61b1f0e296739cecacc640b0ba48e8a7555472e1b").expect("Decodable").try_into().expect("Decodable");
 
-	use k256::ecdsa::{RecoveryId, Signature, VerifyingKey};
-	let rid =
-		RecoveryId::try_from(if signature[64] > 26 { signature[64] - 27 } else { signature[64] })
-			.unwrap();
-	let sig = Signature::from_slice(&signature[..64]).unwrap();
-
-	let recovered_key = VerifyingKey::recover_from_prehash(&signing_message, &sig, rid).unwrap();
-
-	let public_key = recovered_key.to_encoded_point(true);
-	println!("0x{}", hex::encode(public_key));
+	// Check the signature and get the public key
+	let recovered_public_key = sp_io::crypto::secp256k1_ecdsa_recover_compressed(&signature, &signing_message).ok().expect("Recoverable");
+	println!("0x{}", hex::encode(recovered_public_key));
 
 	let decoded_account =
-		AccountId::decode(&mut &sp_io::hashing::blake2_256(&public_key.to_bytes())[..])
+		AccountId::decode(&mut &sp_io::hashing::blake2_256(&recovered_public_key)[..])
 			.expect("Decodable");
 	assert_eq!(decoded_account.to_ss58check(), who);
-
-	// let recovered_eth_public_key = sp_io::crypto::secp256k1_ecdsa_recover(&signature, &signing_message).ok().expect("Recoverable");
-	// // panic!("{}", hex::encode(recovered_eth_public_key));
-	// let decoded_account = AccountId::decode(&mut &sp_io::hashing::blake2_256(&recovered_eth_public_key)[..]).expect("Decodable");
-	// assert_eq!(
-	// 	decoded_account.to_ss58check(),
-	// 	who
-	// );
 }
-
-// #[test]
-// fn foo() {
-// 	use k256::ecdsa::{RecoveryId, Signature, VerifyingKey};
-//
-// 	let eth_address: [u8; 20] = hex::decode("e66bBB2B28273f4f0307e4c48fa30e304203016c").expect("Decodable").try_into().expect("Valid");
-// 	let call_data = "00x00071448656c6c6f";
-// 	let signature: [u8; 65] = hex::decode("8fe82b58127bdaf5090c00375181fb4152ec28af422e371d73a05b776c22f4e70aaa24e2d7604b65cfaf2fe332e6763c9cbafb59c1be7f4a0fd8cae1f3e351fb1b").expect("Decodable").try_into().expect("Valid");
-//
-// 	let eip191_message = format!("\x19Ethereum Signed Message:\n{}{}", call_data.len(), call_data);
-// 	let message_hash = sp_core::keccak_256(eip191_message.as_bytes());
-//
-// 	let rid = RecoveryId::try_from(
-// 		if signature[64] > 26 { signature[64] - 27 } else { signature[64] }
-// 	).unwrap();
-// 	let sig = Signature::from_slice(&signature[..64]).unwrap();
-//
-// 	let recovered_key = VerifyingKey::recover_from_prehash(
-// 		&message_hash,
-// 		&sig,
-// 		rid
-// 	).unwrap();
-//
-// 	let public_key = recovered_key.to_encoded_point(true);
-// 	println!("0x{}", hex::encode(&public_key));
-// 	let public_key = recovered_key.to_encoded_point(false);
-// 	println!("0x{}", hex::encode(&public_key));
-//
-// 	let recovered_eth_address: [u8; 20] = sp_core::keccak_256(&recovered_key.to_encoded_point(false).as_bytes()[1..])[12..].try_into().unwrap();
-// 	assert_eq!(recovered_eth_address, eth_address);
-// }

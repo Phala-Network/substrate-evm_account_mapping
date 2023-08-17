@@ -4514,7 +4514,6 @@ dependencies = [
  "frame-support",
  "frame-system",
  "hex",
- "k256",
  "log",
  "pallet-balances",
  "pallet-transaction-payment",

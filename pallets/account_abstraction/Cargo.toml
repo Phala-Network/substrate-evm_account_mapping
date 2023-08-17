@@ -26,7 +26,6 @@ pallet-transaction-payment = { git = "https://github.com/paritytech/substrate", 
 
 hex = { version = "0.4", default-features = false, features = ["alloc"] }
 log = { version = "0.4.18", default-features = false }
-k256 = { version = "0.13.1", default-features = false, features = ["alloc", "ecdsa"] }
 ethabi = { version = "18.0.0", default-features = false }
 
 [dev-dependencies]
@@ -47,7 +46,6 @@ std = [
 	"pallet-transaction-payment/std",
 	"hex/std",
 	"log/std",
-	"k256/std",
 	"ethabi/std",
 ]
 runtime-benchmarks = [
