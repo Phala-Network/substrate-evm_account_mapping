@@ -142,7 +142,6 @@ pub mod pallet {
 		Unexpected,
 		InvalidSignature,
 		AccountMismatch,
-		DecodeError,
 		NonceError,
 		PaymentError,
 	}
@@ -344,9 +343,13 @@ pub mod pallet {
 			ensure!(decoded_account == who, Error::<T>::AccountMismatch);
 
 			// Bump the nonce ASAP
-			AccountNonce::<T>::mutate(&who, |value| {
+			AccountNonce::<T>::try_mutate(&who, |value| {
+				if *value != nonce {
+					return Err(Error::<T>::NonceError)
+				}
 				*value += 1;
-			});
+				Ok(())
+			})?;
 
 			// It is possible that an account passed `validate_unsigned` check,
 			// but for some reason, its balance isn't enough for the service fee,
