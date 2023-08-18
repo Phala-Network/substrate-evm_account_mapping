@@ -27,8 +27,9 @@ use sp_version::RuntimeVersion;
 pub use frame_support::{
 	construct_runtime, parameter_types,
 	traits::{
-		ConstBool, ConstU128, ConstU32, ConstU64, ConstU8, KeyOwnerProofSystem, Randomness,
-		StorageInfo,
+		ConstBool, ConstU128, ConstU32, ConstU64, ConstU8,
+		Currency, KeyOwnerProofSystem, Randomness,
+		StorageInfo, OnUnbalanced,
 	},
 	weights::{
 		constants::{
@@ -129,6 +130,15 @@ pub const DAYS: BlockNumber = HOURS * 24;
 #[cfg(feature = "std")]
 pub fn native_version() -> NativeVersion {
 	NativeVersion { runtime_version: VERSION, can_author_with: Default::default() }
+}
+
+type NegativeImbalance = <Balances as Currency<AccountId>>::NegativeImbalance;
+
+pub struct DealWithFees;
+impl OnUnbalanced<NegativeImbalance> for DealWithFees {
+	fn on_nonzero_unbalanced(amount: NegativeImbalance) {
+		drop(amount);
+	}
 }
 
 const NORMAL_DISPATCH_RATIO: Perbill = Perbill::from_percent(75);
@@ -278,6 +288,7 @@ impl pallet_account_abstraction::Config for Runtime {
 	type RuntimeCall = RuntimeCall;
 	type Currency = Balances;
 	type ServiceFee = ConstU128<1000>;
+	type OnUnbalancedForServiceFee = ();
 	type CallFilter = frame_support::traits::Everything;
 	type EIP712Name = EIP712Name;
 	type EIP712Version = EIP712Version;

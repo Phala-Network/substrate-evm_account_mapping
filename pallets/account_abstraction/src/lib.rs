@@ -33,19 +33,27 @@ macro_rules! log {
 use frame_support::{
 	dispatch::{DispatchInfo, Dispatchable, GetDispatchInfo, PostDispatchInfo, RawOrigin},
 	traits::{
-		fungible::{Inspect as InspectFungible, Mutate as MutateFungible},
-		tokens::{ExistenceRequirement, Fortitude, Preservation, WithdrawReasons},
-		Contains, Currency, OriginTrait,
+		fungible::{
+			Inspect as InspectFungible,
+			Mutate as MutateFungible,
+			Balanced as BalancedFungible,
+		},
+		tokens::{fungible::Credit, Fortitude, Precision, Preservation},
+		Contains, OriginTrait, Imbalance,
 	},
 	weights::Weight,
 };
 use pallet_transaction_payment::OnChargeTransaction;
 use sp_runtime::FixedPointOperand;
 
+type PaymentOnChargeTransaction<T> = <T as pallet_transaction_payment::Config>::OnChargeTransaction;
+
 type PaymentBalanceOf<T> = <<T as pallet_transaction_payment::Config>::OnChargeTransaction as OnChargeTransaction<T>>::Balance;
 
-type BalanceOf<T> =
-	<<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
+pub type BalanceOf<T> =
+	<<T as Config>::Currency as InspectFungible<<T as frame_system::Config>::AccountId>>::Balance;
+
+pub type CreditOf<T> = Credit<<T as frame_system::Config>::AccountId, <T as Config>::Currency>;
 
 pub type EIP712ChainID = sp_core::U256;
 pub type EIP712VerifyingContractAddress = sp_core::H160;
@@ -57,6 +65,7 @@ pub type Keccak256Signature = [u8; 32];
 pub mod pallet {
 	use super::*;
 	use frame_support::pallet_prelude::*;
+	use frame_support::traits::OnUnbalanced;
 	use frame_system::pallet_prelude::*;
 	use sp_std::prelude::*;
 
@@ -82,12 +91,14 @@ pub mod pallet {
 			+ IsType<<Self as frame_system::Config>::RuntimeCall>;
 
 		/// The system's currency for payment.
-		type Currency: Currency<Self::AccountId>
-			+ InspectFungible<Self::AccountId>
-			+ MutateFungible<Self::AccountId>;
+		type Currency: InspectFungible<Self::AccountId>
+			+ MutateFungible<Self::AccountId>
+			+ BalancedFungible<Self::AccountId>;
 
 		#[pallet::constant]
 		type ServiceFee: Get<BalanceOf<Self>>;
+
+		type OnUnbalancedForServiceFee: OnUnbalanced<CreditOf<Self>>;
 
 		type CallFilter: Contains<<Self as frame_system::Config>::RuntimeCall>;
 
@@ -114,7 +125,8 @@ pub mod pallet {
 	pub enum Event<T: Config> {
 		ServiceFeePaid {
 			who: T::AccountId,
-			fee: BalanceOf<T>,
+			actual_fee: BalanceOf<T>,
+			expected_fee: BalanceOf<T>,
 		},
 		TransactionFeePaid {
 			who: T::AccountId,
@@ -145,7 +157,8 @@ pub mod pallet {
 	#[pallet::validate_unsigned]
 	impl<T: Config> ValidateUnsigned for Pallet<T>
 	where
-		PaymentBalanceOf<T>: Send + Sync + FixedPointOperand,
+		PaymentBalanceOf<T>: FixedPointOperand,
+		BalanceOf<T>: FixedPointOperand,
 		<T as frame_system::Config>::RuntimeCall:
 			Dispatchable<Info = DispatchInfo, PostInfo = PostDispatchInfo>,
 		<T as frame_system::Config>::AccountId: From<[u8; 32]> + Into<[u8; 32]>,
@@ -211,25 +224,10 @@ pub mod pallet {
 				}
 				.into())
 			}
-			AccountNonce::<T>::insert(who, account_nonce + 1);
 
 			// Skip frame_system::CheckWeight<Runtime>
 			// it has implemented `validate_unsigned` and `pre_dispatch_unsigned`, we don't need to
 			// do the validate here.
-
-			// Before we check payment, we let the account pay the service fee
-			T::Currency::withdraw(
-				who,
-				T::ServiceFee::get(),
-				WithdrawReasons::TRANSACTION_PAYMENT,
-				ExistenceRequirement::KeepAlive,
-			)
-			.or(Err(InvalidTransaction::Payment))?;
-
-			Self::deposit_event(Event::ServiceFeePaid {
-				who: who.clone(),
-				fee: T::ServiceFee::get(),
-			});
 
 			// pallet_transaction_payment::ChargeTransactionPayment<Runtime>
 			let tip = tip.unwrap_or(0u32.into());
@@ -238,15 +236,17 @@ pub mod pallet {
 			// We shall get the same `fee` later
 			let est_fee =
 				pallet_transaction_payment::Pallet::<T>::compute_fee(len as u32, &info, tip);
+			// TODO: Need check this work with assets-payment
 			// We don't withdraw the fee here, because we can't cache the imbalance
 			// Instead, we check the account has enough fee
 			// I think this is a hack, or the type can't match
-			let est_fee: u128 = est_fee.try_into().or(Err(InvalidTransaction::Payment))?;
-			let usable_balance_for_fees: u128 =
-				T::Currency::reducible_balance(who, Preservation::Protect, Fortitude::Polite)
-					.try_into()
-					.or(Err(InvalidTransaction::Payment))?;
-			if usable_balance_for_fees < est_fee {
+			let est_fee = est_fee.saturated_into::<u128>();
+			// We can't get the actual size of the meta-tx itself,
+			// so we have to introducing service fee.
+			let service_fee = T::ServiceFee::get().saturated_into::<u128>();
+			let usable_balance_for_fees =
+				T::Currency::reducible_balance(who, Preservation::Protect, Fortitude::Polite).saturated_into::<u128>();
+			if est_fee.saturating_add(service_fee) > usable_balance_for_fees {
 				return Err(InvalidTransaction::Payment.into())
 			}
 
@@ -303,6 +303,7 @@ pub mod pallet {
 	impl<T: Config> Pallet<T>
 	where
 		PaymentBalanceOf<T>: FixedPointOperand,
+		BalanceOf<T>: FixedPointOperand,
 		<T as frame_system::Config>::RuntimeCall:
 			Dispatchable<Info = DispatchInfo, PostInfo = PostDispatchInfo>,
 		T: frame_system::Config<AccountId = sp_runtime::AccountId32>,
@@ -344,6 +345,37 @@ pub mod pallet {
 				T::AccountId::decode(&mut &blake2_256(&recovered_public_key)[..]).unwrap();
 			ensure!(decoded_account == who, Error::<T>::AccountMismatch);
 
+			// Bump the nonce ASAP
+			AccountNonce::<T>::mutate(&who, |value| {
+				*value = *value + 1;
+			});
+
+			// It is possible that an account passed `validate_unsigned` check,
+			// but for some reason, its balance isn't enough for the service fee,
+			// We should withdraw the fee anyway even it isn't enough.
+			// If we can't withdraw enough fee, we will not proceed.
+			let withdrawn = T::Currency::withdraw(
+				&who,
+				T::ServiceFee::get(),
+				Precision::BestEffort,
+				Preservation::Expendable,
+				Fortitude::Polite,
+			)?;
+			let withdrawn_fee = withdrawn.peek();
+
+			T::OnUnbalancedForServiceFee::on_unbalanced(withdrawn);
+
+			Self::deposit_event(Event::ServiceFeePaid {
+				who: who.clone(),
+				actual_fee: withdrawn_fee,
+				expected_fee: T::ServiceFee::get(),
+			});
+
+			ensure!(
+				withdrawn_fee == T::ServiceFee::get(),
+				Error::<T>::PaymentError
+			);
+
 			// Call
 			let mut origin: T::RuntimeOrigin = RawOrigin::Signed(who.clone()).into();
 			origin.add_filter(T::CallFilter::contains);
@@ -352,8 +384,9 @@ pub mod pallet {
 			let tip = tip.unwrap_or(0u32.into());
 			let est_fee =
 				pallet_transaction_payment::Pallet::<T>::compute_fee(len as u32, &info, tip);
+			// Add the service fee
 			let already_withdrawn =
-				<<T as pallet_transaction_payment::Config>::OnChargeTransaction as OnChargeTransaction<T>>::withdraw_fee(&who, &(*call).clone().into(), &info, est_fee, tip).map_err(|_err| Error::<T>::PaymentError)?;
+				<PaymentOnChargeTransaction<T> as OnChargeTransaction<T>>::withdraw_fee(&who, &(*call).clone().into(), &info, est_fee, tip).map_err(|_err| Error::<T>::PaymentError)?;
 
 			let call_result = call.dispatch(origin);
 			let post_info = match call_result {
@@ -367,7 +400,7 @@ pub mod pallet {
 				len as u32, &info, &post_info, tip,
 			);
 			// frame/transaction-payment/src/payment.rs
-			<<T as pallet_transaction_payment::Config>::OnChargeTransaction as OnChargeTransaction<T>>::correct_and_deposit_fee(
+			<PaymentOnChargeTransaction<T> as OnChargeTransaction<T>>::correct_and_deposit_fee(
 				&who, &info, &post_info, actual_fee, tip, already_withdrawn
 			).map_err(|_err| Error::<T>::PaymentError)?;
 			Self::deposit_event(Event::TransactionFeePaid { who: who.clone(), actual_fee, tip });
