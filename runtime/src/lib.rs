@@ -27,9 +27,8 @@ use sp_version::RuntimeVersion;
 pub use frame_support::{
 	construct_runtime, parameter_types,
 	traits::{
-		tokens::fungible::Credit,
-		ConstBool, ConstU128, ConstU32, ConstU64, ConstU8, KeyOwnerProofSystem,
-		OnUnbalanced, Randomness, StorageInfo,
+		tokens::fungible::Credit, ConstBool, ConstU128, ConstU32, ConstU64, ConstU8,
+		KeyOwnerProofSystem, OnUnbalanced, Randomness, StorageInfo,
 	},
 	weights::{
 		constants::{
