@@ -345,7 +345,7 @@ pub mod pallet {
 
 			// Bump the nonce ASAP
 			AccountNonce::<T>::mutate(&who, |value| {
-				*value = *value + 1;
+				*value += 1;
 			});
 
 			// It is possible that an account passed `validate_unsigned` check,
