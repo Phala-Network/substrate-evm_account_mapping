@@ -309,7 +309,6 @@ pub mod pallet {
 		#[pallet::call_index(0)]
 		#[pallet::weight({
 			let di = call.get_dispatch_info();
-			// TODO: benchmarking here
 			(
 				T::WeightInfo::remote_call_from_evm_chain().saturating_add(di.weight),
 				di.class
