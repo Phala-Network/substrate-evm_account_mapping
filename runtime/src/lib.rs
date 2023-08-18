@@ -27,9 +27,9 @@ use sp_version::RuntimeVersion;
 pub use frame_support::{
 	construct_runtime, parameter_types,
 	traits::{
-		ConstBool, ConstU128, ConstU32, ConstU64, ConstU8,
-		Currency, KeyOwnerProofSystem, Randomness,
-		StorageInfo, OnUnbalanced,
+		tokens::fungible::Credit,
+		ConstBool, ConstU128, ConstU32, ConstU64, ConstU8, KeyOwnerProofSystem,
+		OnUnbalanced, Randomness, StorageInfo,
 	},
 	weights::{
 		constants::{
@@ -132,11 +132,11 @@ pub fn native_version() -> NativeVersion {
 	NativeVersion { runtime_version: VERSION, can_author_with: Default::default() }
 }
 
-type NegativeImbalance = <Balances as Currency<AccountId>>::NegativeImbalance;
+type CreditForServiceFee = Credit<AccountId, Balances>;
 
-pub struct DealWithFees;
-impl OnUnbalanced<NegativeImbalance> for DealWithFees {
-	fn on_nonzero_unbalanced(amount: NegativeImbalance) {
+pub struct DealWithServiceFee;
+impl OnUnbalanced<CreditForServiceFee> for DealWithServiceFee {
+	fn on_nonzero_unbalanced(amount: CreditForServiceFee) {
 		drop(amount);
 	}
 }
@@ -288,7 +288,7 @@ impl pallet_account_abstraction::Config for Runtime {
 	type RuntimeCall = RuntimeCall;
 	type Currency = Balances;
 	type ServiceFee = ConstU128<1000>;
-	type OnUnbalancedForServiceFee = ();
+	type OnUnbalancedForServiceFee = DealWithServiceFee;
 	type CallFilter = frame_support::traits::Everything;
 	type EIP712Name = EIP712Name;
 	type EIP712Version = EIP712Version;

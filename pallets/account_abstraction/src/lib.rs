@@ -34,12 +34,10 @@ use frame_support::{
 	dispatch::{DispatchInfo, Dispatchable, GetDispatchInfo, PostDispatchInfo, RawOrigin},
 	traits::{
 		fungible::{
-			Inspect as InspectFungible,
-			Mutate as MutateFungible,
-			Balanced as BalancedFungible,
+			Balanced as BalancedFungible, Inspect as InspectFungible, Mutate as MutateFungible,
 		},
 		tokens::{fungible::Credit, Fortitude, Precision, Preservation},
-		Contains, OriginTrait, Imbalance,
+		Contains, Imbalance, OriginTrait,
 	},
 	weights::Weight,
 };
@@ -64,8 +62,7 @@ pub type Keccak256Signature = [u8; 32];
 #[frame_support::pallet]
 pub mod pallet {
 	use super::*;
-	use frame_support::pallet_prelude::*;
-	use frame_support::traits::OnUnbalanced;
+	use frame_support::{pallet_prelude::*, traits::OnUnbalanced};
 	use frame_system::pallet_prelude::*;
 	use sp_std::prelude::*;
 
@@ -245,7 +242,8 @@ pub mod pallet {
 			// so we have to introducing service fee.
 			let service_fee = T::ServiceFee::get().saturated_into::<u128>();
 			let usable_balance_for_fees =
-				T::Currency::reducible_balance(who, Preservation::Protect, Fortitude::Polite).saturated_into::<u128>();
+				T::Currency::reducible_balance(who, Preservation::Protect, Fortitude::Polite)
+					.saturated_into::<u128>();
 			if est_fee.saturating_add(service_fee) > usable_balance_for_fees {
 				return Err(InvalidTransaction::Payment.into())
 			}
@@ -371,10 +369,7 @@ pub mod pallet {
 				expected_fee: T::ServiceFee::get(),
 			});
 
-			ensure!(
-				withdrawn_fee == T::ServiceFee::get(),
-				Error::<T>::PaymentError
-			);
+			ensure!(withdrawn_fee == T::ServiceFee::get(), Error::<T>::PaymentError);
 
 			// Call
 			let mut origin: T::RuntimeOrigin = RawOrigin::Signed(who.clone()).into();
@@ -386,7 +381,14 @@ pub mod pallet {
 				pallet_transaction_payment::Pallet::<T>::compute_fee(len as u32, &info, tip);
 			// Add the service fee
 			let already_withdrawn =
-				<PaymentOnChargeTransaction<T> as OnChargeTransaction<T>>::withdraw_fee(&who, &(*call).clone().into(), &info, est_fee, tip).map_err(|_err| Error::<T>::PaymentError)?;
+				<PaymentOnChargeTransaction<T> as OnChargeTransaction<T>>::withdraw_fee(
+					&who,
+					&(*call).clone().into(),
+					&info,
+					est_fee,
+					tip,
+				)
+				.map_err(|_err| Error::<T>::PaymentError)?;
 
 			let call_result = call.dispatch(origin);
 			let post_info = match call_result {
@@ -401,8 +403,14 @@ pub mod pallet {
 			);
 			// frame/transaction-payment/src/payment.rs
 			<PaymentOnChargeTransaction<T> as OnChargeTransaction<T>>::correct_and_deposit_fee(
-				&who, &info, &post_info, actual_fee, tip, already_withdrawn
-			).map_err(|_err| Error::<T>::PaymentError)?;
+				&who,
+				&info,
+				&post_info,
+				actual_fee,
+				tip,
+				already_withdrawn,
+			)
+			.map_err(|_err| Error::<T>::PaymentError)?;
 			Self::deposit_event(Event::TransactionFeePaid { who: who.clone(), actual_fee, tip });
 
 			Ok(())
