@@ -342,15 +342,6 @@ pub mod pallet {
 				T::AccountId::decode(&mut &blake2_256(&recovered_public_key)[..]).unwrap();
 			ensure!(decoded_account == who, Error::<T>::AccountMismatch);
 
-			// Bump the nonce ASAP
-			AccountNonce::<T>::try_mutate(&who, |value| {
-				if *value != nonce {
-					return Err(Error::<T>::NonceError)
-				}
-				*value += 1;
-				Ok(())
-			})?;
-
 			// It is possible that an account passed `validate_unsigned` check,
 			// but for some reason, its balance isn't enough for the service fee,
 			// We should withdraw the fee anyway even it isn't enough.
@@ -363,16 +354,22 @@ pub mod pallet {
 				Fortitude::Polite,
 			)?;
 			let withdrawn_fee = withdrawn.peek();
-
 			T::OnUnbalancedForServiceFee::on_unbalanced(withdrawn);
-
 			Self::deposit_event(Event::ServiceFeePaid {
 				who: who.clone(),
 				actual_fee: withdrawn_fee,
 				expected_fee: T::ServiceFee::get(),
 			});
-
 			ensure!(withdrawn_fee == T::ServiceFee::get(), Error::<T>::PaymentError);
+
+			// Bump the nonce
+			AccountNonce::<T>::try_mutate(&who, |value| {
+				if *value != nonce {
+					return Err(Error::<T>::NonceError)
+				}
+				*value += 1;
+				Ok(())
+			})?;
 
 			// Call
 			let mut origin: T::RuntimeOrigin = RawOrigin::Signed(who.clone()).into();
