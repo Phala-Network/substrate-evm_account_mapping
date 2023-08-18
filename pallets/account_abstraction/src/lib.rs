@@ -42,16 +42,17 @@ use frame_support::{
 	weights::Weight,
 };
 use pallet_transaction_payment::OnChargeTransaction;
+use sp_io::hashing::blake2_256;
 use sp_runtime::FixedPointOperand;
 
 type PaymentOnChargeTransaction<T> = <T as pallet_transaction_payment::Config>::OnChargeTransaction;
 
 type PaymentBalanceOf<T> = <<T as pallet_transaction_payment::Config>::OnChargeTransaction as OnChargeTransaction<T>>::Balance;
 
-pub type BalanceOf<T> =
+type BalanceOf<T> =
 	<<T as Config>::Currency as InspectFungible<<T as frame_system::Config>::AccountId>>::Balance;
 
-pub type CreditOf<T> = Credit<<T as frame_system::Config>::AccountId, <T as Config>::Currency>;
+type CreditOf<T> = Credit<<T as frame_system::Config>::AccountId, <T as Config>::Currency>;
 
 pub type EIP712ChainID = sp_core::U256;
 pub type EIP712VerifyingContractAddress = sp_core::H160;
@@ -140,8 +141,6 @@ pub mod pallet {
 	#[pallet::error]
 	pub enum Error<T> {
 		Unexpected,
-		InvalidSignature,
-		AccountMismatch,
 		NonceError,
 		PaymentError,
 	}
@@ -189,8 +188,7 @@ pub mod pallet {
 
 			// Deserialize the actual caller
 			let decoded_account =
-				T::AccountId::decode(&mut &sp_io::hashing::blake2_256(&recovered_public_key)[..])
-					.unwrap();
+				T::AccountId::decode(&mut &blake2_256(&recovered_public_key)[..]).unwrap();
 			if who != &decoded_account {
 				return Err(InvalidTransaction::BadSigner.into())
 			}
@@ -319,27 +317,16 @@ pub mod pallet {
 			who: T::AccountId,
 			call: Box<<T as Config>::RuntimeCall>,
 			nonce: Nonce,
-			signature: [u8; 65],
+			#[allow(unused_variables)] signature: [u8; 65],
 			tip: Option<PaymentBalanceOf<T>>,
 		) -> DispatchResult {
-			use sp_io::hashing::blake2_256;
-
 			// This is an unsigned transaction
 			ensure_none(origin)?;
 
-			// Verify the signature and get the public key
-			let call_data = <T as Config>::RuntimeCall::encode(&call);
-			let message_hash = Self::eip712_message_hash(who.clone(), &call_data, nonce);
-			let Ok(recovered_public_key) =
-				sp_io::crypto::secp256k1_ecdsa_recover_compressed(&signature, &message_hash)
-			else {
-				return Err(Error::<T>::InvalidSignature.into())
-			};
-
-			// Deserialize the actual caller
-			let decoded_account =
-				T::AccountId::decode(&mut &blake2_256(&recovered_public_key)[..]).unwrap();
-			ensure!(decoded_account == who, Error::<T>::AccountMismatch);
+			// We don't need to re-validate the signature here,
+			// because it already validated in `validate_unsigned` stage,
+			// and it should no way to skip.
+			// TODO: Confirm this.
 
 			// It is possible that an account passed `validate_unsigned` check,
 			// but for some reason, its balance isn't enough for the service fee,
