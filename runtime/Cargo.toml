@@ -48,7 +48,7 @@ frame-benchmarking = { git = "https://github.com/paritytech/substrate", branch =
 frame-system-benchmarking = { git = "https://github.com/paritytech/substrate", branch = "master", default-features = false, optional = true }
 
 # Local Dependencies
-pallet-account_abstraction = { path = "../pallets/account_abstraction", default-features = false }
+pallet-evm_account_mapping = { path = "../pallets/evm_account_mapping", default-features = false }
 
 [build-dependencies]
 substrate-wasm-builder = { git = "https://github.com/paritytech/substrate", branch = "master", optional = true }
@@ -86,7 +86,7 @@ std = [
 	"sp-transaction-pool/std",
 	"sp-version/std",
 	"substrate-wasm-builder",
-	"pallet-account_abstraction/std",
+	"pallet-evm_account_mapping/std",
 ]
 runtime-benchmarks = [
 	"frame-benchmarking/runtime-benchmarks",
@@ -98,7 +98,7 @@ runtime-benchmarks = [
 	"pallet-sudo/runtime-benchmarks",
 	"pallet-timestamp/runtime-benchmarks",
 	"sp-runtime/runtime-benchmarks",
-	"pallet-account_abstraction/runtime-benchmarks",
+	"pallet-evm_account_mapping/runtime-benchmarks",
 ]
 try-runtime = [
 	"frame-try-runtime/try-runtime",
@@ -111,5 +111,5 @@ try-runtime = [
 	"pallet-sudo/try-runtime",
 	"pallet-timestamp/try-runtime",
 	"pallet-transaction-payment/try-runtime",
-	"pallet-account_abstraction/try-runtime",
+	"pallet-evm_account_mapping/try-runtime",
 ]

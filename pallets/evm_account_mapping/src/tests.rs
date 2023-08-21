@@ -23,7 +23,7 @@ fn it_works() {
 		// Dispatch a signed extrinsic.
 		// 0x07003d589a72aacea3f5f98494fdb5a7c3c70296b2410fa7552444d0206f61aa8e9100071448656c6c6f00000000000000008fe82b58127bdaf5090c00375181fb4152ec28af422e371d73a05b776c22f4e70aaa24e2d7604b65cfaf2fe332e6763c9cbafb59c1be7f4a0fd8cae1f3e351fb1b
 		assert_ok!(
-			AccountAbstraction::remote_call_from_evm_chain(
+			EvmAccountMapping::meta_call(
 				RuntimeOrigin::none(),
 				account,
 				Box::<RuntimeCall>::new(call),

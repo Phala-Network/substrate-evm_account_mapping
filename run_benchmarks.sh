@@ -5,10 +5,10 @@ set -e
 PROJECT_ROOT=$(dirname "$(readlink -f "$0")")
 cd "$PROJECT_ROOT"
 
-echo "*** Run benchmark for pallet-account_abstraction ***"
+echo "*** Run benchmark for pallet-evm_account_mapping ***"
 
-./target/release/node-template benchmark pallet \
-  --pallet=pallet_account_abstraction \
+./target/production/node-template benchmark pallet \
+  --pallet=pallet_evm_account_mapping \
   --extrinsic="*" \
   --chain=dev \
   --steps=50 \
@@ -18,5 +18,5 @@ echo "*** Run benchmark for pallet-account_abstraction ***"
   --no-min-squares \
   --wasm-execution=compiled \
   --heap-pages=4096 \
-  --output=./pallets/account_abstraction/src/weights.rs \
+  --output=./pallets/evm_account_mapping/src/weights.rs \
   --template=./pallet-weight-template.hbs

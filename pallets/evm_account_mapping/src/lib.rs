@@ -165,8 +165,8 @@ pub mod pallet {
 			_source: TransactionSource,
 			unsigned_call: &Self::Call,
 		) -> TransactionValidity {
-			// Only allow `remote_call_from_evm_chain`
-			let Call::remote_call_from_evm_chain {
+			// Only allow `meta_call`
+			let Call::meta_call {
 				ref who,
 				ref call,
 				ref nonce,
@@ -284,7 +284,7 @@ pub mod pallet {
 			let priority = scaled_tip.saturated_into::<TransactionPriority>();
 
 			// Finish the validation
-			let valid_transaction_builder = ValidTransaction::with_tag_prefix("AccountAbstraction")
+			let valid_transaction_builder = ValidTransaction::with_tag_prefix("EVMAccountMapping")
 				.priority(priority)
 				.and_provides(provides)
 				.longevity(5)
@@ -308,11 +308,11 @@ pub mod pallet {
 		#[pallet::weight({
 			let di = call.get_dispatch_info();
 			(
-				T::WeightInfo::remote_call_from_evm_chain().saturating_add(di.weight),
+				T::WeightInfo::meta_call().saturating_add(di.weight),
 				di.class
 			)
 		})]
-		pub fn remote_call_from_evm_chain(
+		pub fn meta_call(
 			origin: OriginFor<T>,
 			who: T::AccountId,
 			call: Box<<T as Config>::RuntimeCall>,

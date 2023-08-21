@@ -1,7 +1,7 @@
 [package]
-name = "pallet-account_abstraction"
+name = "pallet-evm_account_mapping"
 version = "0.0.1"
-description = "FRAME pallet template for defining custom runtime logic."
+description = "A Substrate pallet for compatible with EVM wallets."
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true

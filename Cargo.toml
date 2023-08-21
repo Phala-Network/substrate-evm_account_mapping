@@ -28,7 +28,7 @@ license = "MIT"
 resolver = "2"
 members = [
     "node",
-    "pallets/account_abstraction",
+    "pallets/*",
     "runtime",
 ]
 

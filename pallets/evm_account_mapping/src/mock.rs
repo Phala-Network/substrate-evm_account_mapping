@@ -1,4 +1,4 @@
-use crate as pallet_account_abstraction;
+use crate as pallet_evm_account_mapping;
 use frame_support::{
 	dispatch::DispatchClass,
 	pallet_prelude::*,
@@ -31,7 +31,7 @@ frame_support::construct_runtime!(
 		System: frame_system,
 		Balances: pallet_balances,
 		TransactionPayment: pallet_transaction_payment,
-		AccountAbstraction: pallet_account_abstraction,
+		EvmAccountMapping: pallet_evm_account_mapping,
 	}
 );
 
@@ -155,7 +155,7 @@ parameter_types! {
 	pub EIP712VerifyingContractAddress: crate::EIP712VerifyingContractAddress = sp_core::H160::from([0u8; 20]);
 }
 
-impl pallet_account_abstraction::Config for Test {
+impl pallet_evm_account_mapping::Config for Test {
 	type RuntimeEvent = RuntimeEvent;
 	type RuntimeCall = RuntimeCall;
 	type Currency = Balances;

@@ -4824,9 +4824,9 @@ dependencies = [
  "frame-system-benchmarking",
  "frame-system-rpc-runtime-api",
  "frame-try-runtime",
- "pallet-account_abstraction",
  "pallet-aura",
  "pallet-balances",
+ "pallet-evm_account_mapping",
  "pallet-grandpa",
  "pallet-sudo",
  "pallet-timestamp",
@@ -5043,26 +5043,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pallet-account_abstraction"
-version = "0.0.1"
-dependencies = [
- "ethabi",
- "frame-benchmarking",
- "frame-support",
- "frame-system",
- "hex",
- "log",
- "pallet-balances",
- "pallet-transaction-payment",
- "parity-scale-codec",
- "scale-info",
- "sp-core",
- "sp-io",
- "sp-runtime",
- "sp-std",
-]
-
-[[package]]
 name = "pallet-aura"
 version = "4.0.0-dev"
 source = "git+https://github.com/paritytech/substrate?branch=master#94be94be6d26becd2395b58ae09ca31f596afe7d"
@@ -5103,6 +5083,26 @@ dependencies = [
  "log",
  "parity-scale-codec",
  "scale-info",
+ "sp-runtime",
+ "sp-std",
+]
+
+[[package]]
+name = "pallet-evm_account_mapping"
+version = "0.0.1"
+dependencies = [
+ "ethabi",
+ "frame-benchmarking",
+ "frame-support",
+ "frame-system",
+ "hex",
+ "log",
+ "pallet-balances",
+ "pallet-transaction-payment",
+ "parity-scale-codec",
+ "scale-info",
+ "sp-core",
+ "sp-io",
  "sp-runtime",
  "sp-std",
 ]
