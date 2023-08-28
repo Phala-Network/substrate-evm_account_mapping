@@ -19,4 +19,5 @@ echo "*** Run benchmark for pallet-evm_account_mapping ***"
   --wasm-execution=compiled \
   --heap-pages=4096 \
   --output=./pallets/evm_account_mapping/src/weights.rs \
-  --template=./pallet-weight-template.hbs
+  --template=./pallet-weight-template.hbs \
+  --header ./HEADER-APACHE2
