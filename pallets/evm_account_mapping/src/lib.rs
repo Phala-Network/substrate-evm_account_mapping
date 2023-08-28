@@ -50,11 +50,10 @@ macro_rules! log {
 use frame_support::{
 	dispatch::{DispatchInfo, Dispatchable, GetDispatchInfo, PostDispatchInfo, RawOrigin},
 	traits::{
-		fungible::{
-			Balanced as BalancedFungible, Inspect as InspectFungible, Mutate as MutateFungible,
-		},
-		tokens::{fungible::Credit, Fortitude, Precision, Preservation},
+		tokens::{Fortitude, Preservation},
+		fungible::Inspect as InspectFungible,
 		Contains, Imbalance, OriginTrait,
+		Currency,
 	},
 	weights::Weight,
 };
@@ -66,11 +65,8 @@ type PaymentOnChargeTransaction<T> = <T as pallet_transaction_payment::Config>::
 
 type PaymentBalanceOf<T> = <<T as pallet_transaction_payment::Config>::OnChargeTransaction as OnChargeTransaction<T>>::Balance;
 
-type BalanceOf<T> =
-	<<T as Config>::Currency as InspectFungible<<T as frame_system::Config>::AccountId>>::Balance;
-
-type CreditOf<T> = Credit<<T as frame_system::Config>::AccountId, <T as Config>::Currency>;
-
+type BalanceOf<T> = <<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
+type NegativeImbalanceOf<T> = <<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::NegativeImbalance;
 pub type EIP712ChainID = sp_core::U256;
 pub type EIP712VerifyingContractAddress = sp_core::H160;
 
@@ -106,14 +102,12 @@ pub mod pallet {
 			+ IsType<<Self as frame_system::Config>::RuntimeCall>;
 
 		/// The system's currency for payment.
-		type Currency: InspectFungible<Self::AccountId>
-			+ MutateFungible<Self::AccountId>
-			+ BalancedFungible<Self::AccountId>;
+		type Currency: InspectFungible<Self::AccountId> + Currency<Self::AccountId>;
 
 		#[pallet::constant]
 		type ServiceFee: Get<BalanceOf<Self>>;
 
-		type OnUnbalancedForServiceFee: OnUnbalanced<CreditOf<Self>>;
+		type OnUnbalancedForServiceFee: OnUnbalanced<NegativeImbalanceOf<Self>>;
 
 		type CallFilter: Contains<<Self as frame_system::Config>::RuntimeCall>;
 
@@ -256,7 +250,7 @@ pub mod pallet {
 			// so we have to introducing service fee.
 			let service_fee = T::ServiceFee::get().saturated_into::<u128>();
 			let usable_balance_for_fees =
-				T::Currency::reducible_balance(who, Preservation::Protect, Fortitude::Polite)
+				T::Currency::reducible_balance(who, Preservation::Preserve, Fortitude::Polite)
 					.saturated_into::<u128>();
 			if est_fee.saturating_add(service_fee) > usable_balance_for_fees {
 				return Err(InvalidTransaction::Payment.into())
@@ -346,16 +340,15 @@ pub mod pallet {
 			// TODO: Confirm this.
 
 			// It is possible that an account passed `validate_unsigned` check,
-			// but for some reason, its balance isn't enough for the service fee,
-			// We should withdraw the fee anyway even it isn't enough.
-			// If we can't withdraw enough fee, we will not proceed.
+			// but for some reason, its balance isn't enough for the service fee.
+			use frame_support::traits::tokens::{WithdrawReasons, ExistenceRequirement};
+			// NOTE: it is possible that the account doesn't have enough fee, which is a vulnerable.
 			let withdrawn = T::Currency::withdraw(
 				&who,
 				T::ServiceFee::get(),
-				Precision::BestEffort,
-				Preservation::Expendable,
-				Fortitude::Polite,
-			)?;
+				WithdrawReasons::FEE,
+				ExistenceRequirement::KeepAlive
+			).map_err(|_err| Error::<T>::PaymentError)?;
 			let withdrawn_fee = withdrawn.peek();
 			T::OnUnbalancedForServiceFee::on_unbalanced(withdrawn);
 			Self::deposit_event(Event::ServiceFeePaid {
@@ -363,7 +356,6 @@ pub mod pallet {
 				actual_fee: withdrawn_fee,
 				expected_fee: T::ServiceFee::get(),
 			});
-			ensure!(withdrawn_fee == T::ServiceFee::get(), Error::<T>::PaymentError);
 
 			// Bump the nonce
 			AccountNonce::<T>::try_mutate(&who, |value| {

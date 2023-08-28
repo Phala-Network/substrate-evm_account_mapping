@@ -29,6 +29,7 @@ pub use frame_support::{
 	traits::{
 		tokens::fungible::Credit, ConstBool, ConstU128, ConstU32, ConstU64, ConstU8,
 		KeyOwnerProofSystem, OnUnbalanced, Randomness, StorageInfo,
+		Currency,
 	},
 	weights::{
 		constants::{
@@ -131,11 +132,11 @@ pub fn native_version() -> NativeVersion {
 	NativeVersion { runtime_version: VERSION, can_author_with: Default::default() }
 }
 
-type CreditForServiceFee = Credit<AccountId, Balances>;
+type NegativeImbalance = <Balances as Currency<AccountId>>::NegativeImbalance;
 
 pub struct DealWithServiceFee;
-impl OnUnbalanced<CreditForServiceFee> for DealWithServiceFee {
-	fn on_nonzero_unbalanced(amount: CreditForServiceFee) {
+impl OnUnbalanced<NegativeImbalance> for DealWithServiceFee {
+	fn on_nonzero_unbalanced(amount: NegativeImbalance) {
 		drop(amount);
 	}
 }
@@ -286,7 +287,7 @@ impl pallet_evm_account_mapping::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type RuntimeCall = RuntimeCall;
 	type Currency = Balances;
-	type ServiceFee = ConstU128<1000>;
+	type ServiceFee = ConstU128<10000000000>;
 	type OnUnbalancedForServiceFee = DealWithServiceFee;
 	type CallFilter = frame_support::traits::Everything;
 	type EIP712Name = EIP712Name;
