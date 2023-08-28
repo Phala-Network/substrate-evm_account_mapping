@@ -429,6 +429,8 @@ pub mod pallet {
 			call_data: &[u8],
 			nonce: Nonce,
 		) -> Keccak256Signature {
+			use sp_std::vec;
+
 			// TODO: will refactor this in Kevin's way for performance.
 			let eip712_domain = crate::eip712::EIP712Domain {
 				name: T::EIP712Name::get(),
