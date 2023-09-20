@@ -48,7 +48,7 @@ macro_rules! log {
 }
 
 use frame_support::{
-	dispatch::{DispatchInfo, Dispatchable, GetDispatchInfo, PostDispatchInfo, RawOrigin},
+	dispatch::{DispatchInfo, GetDispatchInfo, PostDispatchInfo, RawOrigin},
 	traits::{
 		tokens::{Fortitude, Preservation},
 		fungible::Inspect as InspectFungible,
@@ -59,7 +59,7 @@ use frame_support::{
 };
 use pallet_transaction_payment::OnChargeTransaction;
 use sp_io::hashing::blake2_256;
-use sp_runtime::FixedPointOperand;
+use sp_runtime::{traits::Dispatchable, FixedPointOperand};
 
 type PaymentOnChargeTransaction<T> = <T as pallet_transaction_payment::Config>::OnChargeTransaction;
 
