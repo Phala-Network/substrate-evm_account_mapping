@@ -51,7 +51,7 @@ mod benchmarks {
 		let nonce: u64 = 0;
 		let signature: [u8; 65] = hex::decode("37cb6ff8e296d7e476ee13a6cfababe788217519d428fcc723b482dc97cb4d1359a8d1c020fe3cebc1d06a67e61b1f0e296739cecacc640b0ba48e8a7555472e1b").expect("Decodable").try_into().expect("Valid");
 
-		T::Currency::set_balance(&account, BalanceOf::<T>::max_value() / 2u32.into());
+		T::Currency::make_free_balance_be(&account, BalanceOf::<T>::max_value() / 2u32.into());
 
 		#[extrinsic_call]
 		_(RawOrigin::None, account, Box::new(call.into()), nonce, signature, None);
