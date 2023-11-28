@@ -17,6 +17,7 @@
 
 use crate as pallet_evm_account_mapping;
 use frame_support::{
+	derive_impl,
 	dispatch::DispatchClass,
 	pallet_prelude::*,
 	parameter_types,
@@ -77,6 +78,7 @@ parameter_types! {
 	pub static OperationalFeeMultiplier: u8 = 5;
 }
 
+#[derive_impl(frame_system::config_preludes::TestDefaultConfig as frame_system::DefaultConfig)]
 impl frame_system::Config for Test {
 	type RuntimeEvent = RuntimeEvent;
 	type BaseCallFilter = frame_support::traits::Everything;
