@@ -1,6 +1,22 @@
 EVM Account Mapping Pallet for Substrate
 ====
 
+This is a Substrate pallet that enable interactive with EVM-compatible wallets.
+
+It give us a chance to lure EVM chains Web3ers to try the amazing Polkadot economic or Sub-based standalone chains.
+
+Highlights:
+- Account mapping, not abstraction
+  - the Substrate account is 1:1 mapping from ETH private key
+  - User can export the private key and import to Polkadot.js extension to take full control of the Substrate account 
+- Super lightweight, super easy to integrate to Substrate chains
+  - The pallet only dependent `pallet-transaction-payment`
+  - No extra RPC or RuntimeAPI
+  - No need to modify the Runtime or node
+- Super lightweight, super easy to integrate to frontends
+  - No forked package
+  - No monkey patch, no injection
+
 ## Try
 
 ### Import ETH private key to Polkadot.js
@@ -26,7 +42,69 @@ $ cargo build --release
 $ target/release/node-template --dev
 ```
 
+### Run the demo frontend
+
+See [demo/README.md](demo/README.md)
+
+## Integrate
+
+### Integrate to your Substrate-based blockchain
+
+First, add the pallet to your runtime `Cargo.toml`
+
+Then, add config to your runtime
+
+```rust
+parameter_types! {
+	pub EIP712Name: Vec<u8> = b"Substrate".to_vec();
+	pub EIP712Version: Vec<u8> = b"1".to_vec();
+	pub EIP712ChainID: pallet_evm_account_mapping::EIP712ChainID = sp_core::U256::from(0);
+	pub EIP712VerifyingContractAddress: pallet_evm_account_mapping::EIP712VerifyingContractAddress = sp_core::H160::from([0u8; 20]);
+}
+
+impl pallet_evm_account_mapping::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	type RuntimeCall = RuntimeCall;
+	type Currency = Balances;
+	type ServiceFee = ConstU128<10000000000>;
+	type OnUnbalancedForServiceFee = DealWithServiceFee;
+	type CallFilter = frame_support::traits::Everything;
+	type EIP712Name = EIP712Name;
+	type EIP712Version = EIP712Version;
+	type EIP712ChainID = EIP712ChainID;
+	type EIP712VerifyingContractAddress = EIP712VerifyingContractAddress;
+	type WeightInfo = pallet_evm_account_mapping::weights::SubstrateWeight<Runtime>;
+}
+```
+
+### Integrate to your dApp
+
+See [frontend-sdk/README.md](frontend-sdk/README.md)
+
+## Technical details
+
+TD;LR:
+- EVM-compatible chains private keys are `ECDSA` which Substrate supports it as well
+- The difference is how calculate address
+  - We can get the public address, and calculate ETH address and Substrate address which 1:1 mapping
+- To confirm the user's identity, we can ask the wallet sign the Substrate call
+  - The pallet will verify it
+  - We choose EIP-712 standard signature for better visibility and security
+- Because the call signed by a ETH wallet, we have to make it be an unsigned call
+  - That's why `meta_call`
+- For security, we simulate the signed call workflow (`SignedExtra`)
+  - `frame_system::CheckNonZeroSender<Runtime>`
+  - `frame_system::CheckSpecVersion<Runtime>`
+  - `frame_system::CheckTxVersion<Runtime>`
+  - `frame_system::CheckGenesis<Runtime>`
+  - `frame_system::CheckEra<Runtime>`
+  - `frame_system::CheckNonce<Runtime>`
+  - `frame_system::CheckWeight<Runtime>`
+  - `pallet_transaction_payment::ChargeTransactionPayment<Runtime>`
+
 ### Understand how to make meta call data
+
+You can check [the PoC code](docs/poc.ts) to understanding theory.
 
 `deno run --allow-all docs/poc.ts`
 
