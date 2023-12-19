@@ -132,13 +132,16 @@ function RpcInput() {
           id="rpc"
           value={rpc}
           onChange={ev => setRpc(ev.target.value)}
-          className="block w-full rounded-md border-0 px-2.5 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6 font-mono"
+          className="block w-full rounded-md border-0 px-2.5 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6 font-mono pr-16"
           placeholder="ws://127.0.0.1:9944"
         />
         <div className="absolute inset-y-0 right-0 flex py-1.5 pr-1.5">
           <button
             className="inline-flex items-center rounded border border-gray-200 px-1 font-sans text-xs text-gray-400"
-            onClick={() => setRpc(RESET)}
+            onClick={(ev) => {
+              ev.preventDefault()
+              setRpc(RESET)
+            }}
           >
             RESET
           </button>
@@ -159,7 +162,7 @@ function BlockExploerInput() {
         <input
           name="blockExplorer"
           id="blockExplorer"
-          className="block w-full rounded-md border-0 px-2.5 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6 font-mono"
+          className="block w-full rounded-md border-0 px-2.5 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6 font-mono pr-16"
           value={blockExplorer}
           onChange={ev => setBlockExplorer(ev.target.value)}
           placeholder="Block Explorer URL, e.g. https://poc6-statescan.phala.network or https://phala.subscan.io"
@@ -167,7 +170,10 @@ function BlockExploerInput() {
         <div className="absolute inset-y-0 right-0 flex py-1.5 pr-1.5">
           <button
             className="inline-flex items-center rounded border border-gray-200 px-1 font-sans text-xs text-gray-400"
-            onClick={() => setBlockExplorer(RESET)}
+            onClick={(ev) => {
+              ev.preventDefault()
+              setBlockExplorer(RESET)
+            }}
           >
             RESET
           </button>
@@ -256,8 +262,8 @@ function MappingAddress() {
       <div className="px-4 py-5 sm:p-6">
         <h3 className="text-base font-semibold leading-6 text-gray-900">Mapping Account</h3>
         <div className="pt-4 px-2.5 bg-stone-50 rounded-sm border border-stone-200 mt-4">
-          <LightBulbIcon className="w-4 h-4 text-yellow-400 float-left mt-1.5" />
-          <article className="prose prose-stone ml-7 max-w-4xl prose-a:text-gray-500">
+          <LightBulbIcon className="w-4 h-4 text-yellow-400 hidden sm:block sm:float-left sm:mt-1.5" />
+          <article className="prose prose-stone sm:ml-7 max-w-4xl prose-a:text-gray-500">
             <p>
               Here is the current connected account's address and its mapping substrate address in SS58 format. It is generated using the same private key, but it does not require access to your private key. Instead, it is calculated based on the public key of your wallet.
             </p>
@@ -379,15 +385,15 @@ function ViewTrxHelpText({ theAtom }: { theAtom: Atom<string> }) {
         </div>
         <div className="ml-3">
           <h3 className="text-sm font-medium text-green-800">In Block</h3>
-          <div className="mt-2 text-sm text-green-700">
+          <div className="mt-2 text-sm text-green-700 overflow-x-scroll w-64 sm:w-auto">
             <p>Extrinsic <code>{trxId}</code> already in block.</p>
           </div>
           <div className="mt-4">
-            <div className="-mx-2 -my-1.5 flex">
+            <div className="-mx-2 -my-1.5 flex flex-col sm:flex-row gap-2.5">
               <a
                 href={`https://polkadot.js.org/apps/?rpc=${rpc}#/explorer/query/${trxId}`}
                 target="_blank"
-                className="rounded-md bg-green-100 px-2 py-1.5 text-sm font-medium text-green-800 hover:bg-green-100 focus:outline-none focus:ring-2 focus:ring-green-600 focus:ring-offset-2 focus:ring-offset-green-50"
+                className="rounded-md bg-green-200 px-2 py-1.5 text-sm font-medium text-green-800 hover:bg-green-100 focus:outline-none focus:ring-2 focus:ring-green-600 focus:ring-offset-2 focus:ring-offset-green-50"
               >
                 View on Polkadot Portal
               </a>
@@ -395,7 +401,7 @@ function ViewTrxHelpText({ theAtom }: { theAtom: Atom<string> }) {
               <a
                 href={`${blockExplorer}/blocks/${trxId}`}
                 target="_blank"
-                className="ml-3 rounded-md bg-green-100 px-2 py-1.5 text-sm font-medium text-green-800 hover:bg-green-100 focus:outline-none focus:ring-2 focus:ring-green-600 focus:ring-offset-2 focus:ring-offset-green-50"
+                className="rounded-md bg-green-200 px-2 py-1.5 text-sm font-medium text-green-800 hover:bg-green-100 focus:outline-none focus:ring-2 focus:ring-green-600 focus:ring-offset-2 focus:ring-offset-green-50"
               >
                 View on StateScan
               </a>
@@ -443,8 +449,8 @@ function TransferToAddress() {
         setIsPending(false)
       }
     }}>
-      <div className="flex flex-row gap-2.5 items-center">
-        <div className="grow">
+      <div className="flex flex-col sm:flex-row gap-2.5 sm:items-center">
+        <div className="grow w-full sm:w-auto">
           <div className="relative mt-2 rounded-md shadow-sm">
             <input
               disabled={!enabled}
@@ -452,11 +458,11 @@ function TransferToAddress() {
               name="address"
               className="block w-full rounded-md border-0 px-2.5 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6 font-mono"
               placeholder="substrate address"
-              value="45R2pfjQUW2s9PQRHU48HQKLKHVMaDja7N3wpBtmF28UYDs2"
+              defaultValue="45R2pfjQUW2s9PQRHU48HQKLKHVMaDja7N3wpBtmF28UYDs2"
             />
           </div>
         </div>
-        <div>
+        <div className="w-full sm:w-auto">
           <div className="relative mt-2 rounded-md shadow-sm">
             <input
               disabled={!enabled}
@@ -464,7 +470,7 @@ function TransferToAddress() {
               id="amount"
               className="block w-full rounded-md border-0 py-1.5 pl-2.5 pr-12 text-gray-900 ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
               placeholder="0.00"
-              value="1"
+              defaultValue="1"
             />
             <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
               <span className="text-gray-500 sm:text-sm">
@@ -503,8 +509,8 @@ function ClaimTestTokenHelpText() {
   const blockExplorer = useAtomValue(blockExplorerAtom)
   return (
     <div className="py-4 px-2.5 bg-stone-50 rounded-sm border border-stone-200">
-      <LightBulbIcon className="w-4 h-4 text-yellow-400 float-left mt-1.5" />
-      <article className="prose prose-stone ml-7 max-w-4xl prose-a:text-gray-500">
+      <LightBulbIcon className="w-4 h-4 text-yellow-400 hidden sm:block sm:float-left sm:mt-1.5" />
+      <article className="prose prose-stone sm:ml-7 max-w-4xl prose-a:text-gray-500">
         {!connected ? (
           <p>
             You need to connect your wallet in order to see the balance.
@@ -532,10 +538,10 @@ export function Stage() {
         EVM Account Mapping Pallet for Substrate
       </h1>
 
-      <div className="bg-white shadow sm:rounded-lg py-5 sm:p-6 flex flex-col gap-2.5">
+      <div className="bg-white shadow sm:rounded-lg py-5 px-2.5 sm:p-6 flex flex-col gap-2.5">
         <div className="pt-4 px-2.5 bg-stone-50 rounded-sm border border-stone-200">
-          <LightBulbIcon className="w-4 h-4 text-yellow-400 float-left mt-1.5" />
-          <article className="prose prose-stone ml-7 max-w-4xl prose-a:text-gray-500">
+          <LightBulbIcon className="w-4 h-4 text-yellow-400 hidden sm:block sm:float-left mt-1.5" />
+          <article className="prose prose-stone sm:ml-7 max-w-4xl prose-a:text-gray-500">
             <p>
               You need connect to a Substrate node with <code>evm_account_mapping</code> pallet. Or you can build your own test node here: <a href="https://github.com/Phala-Network/substrate-evm_account_mapping" target="_blank">github.com/Phala-Network/substrate-evm_account_mapping</a>.
             </p>
@@ -547,7 +553,7 @@ export function Stage() {
             </p>
           </article>
         </div>
-        <div className="flex flex-row gap-2.5">
+        <div className="flex flex-col sm:flex-row gap-2.5">
           <form className="flex flex-col gap-2.5 grow">
             <RpcInput />
             <BlockExploerInput />
@@ -572,8 +578,8 @@ export function Stage() {
 
       <div className="bg-white shadow sm:rounded-lg flex flex-col gap-2.5 px-4 py-5 sm:p-6">
         <div className="py-4 px-2.5 bg-stone-50 rounded-sm border border-stone-200">
-          <LightBulbIcon className="w-4 h-4 text-yellow-400 float-left mt-1.5" />
-          <article className="prose prose-stone ml-7 max-w-4xl prose-a:text-gray-500">
+          <LightBulbIcon className="w-4 h-4 text-yellow-400 hidden sm:block sm:float-left mt-1.5" />
+          <article className="prose prose-stone sm:ml-7 max-w-4xl prose-a:text-gray-500 overflow-x-scroll">
             <p>
               Our SDK allows you to sign transactions with your EVM compatible wallet and send them to the Substrate node. It will redirect any extrinsics to the <code>evm_account_mapping</code> pallet with minimal modifications.
             </p>
