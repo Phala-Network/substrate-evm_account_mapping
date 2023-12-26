@@ -194,12 +194,13 @@ pub mod pallet {
 			let Ok(recovered_public_key) =
 				sp_io::crypto::secp256k1_ecdsa_recover_compressed(signature, &message_hash)
 			else {
-				return Err(InvalidTransaction::BadProof.into())
+				return Err(InvalidTransaction::Call.into())
 			};
 
 			// Deserialize the actual caller
 			let decoded_account =
-				T::AccountId::decode(&mut &blake2_256(&recovered_public_key)[..]).unwrap();
+				T::AccountId::decode(
+					&mut &blake2_256(&recovered_public_key)[..]).map_err(|_err| InvalidTransaction::Call)?;
 			if who != &decoded_account {
 				return Err(InvalidTransaction::BadSigner.into())
 			}
