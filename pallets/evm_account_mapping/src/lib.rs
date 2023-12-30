@@ -71,18 +71,21 @@ type BalanceOf<T> = <<T as Config>::Currency as Currency<<T as frame_system::Con
 type NegativeImbalanceOf<T> = <<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::NegativeImbalance;
 pub type EIP712ChainID = sp_core::U256;
 pub type EIP712VerifyingContractAddress = sp_core::H160;
+pub type EIP712Signature = [u8; 65];
 
 pub type Nonce = u64;
+pub type AccountId32Bytes = [u8; 32];
+pub type EvmPublicKey = [u8; 33];
 pub type Keccak256Signature = [u8; 32];
 
 pub trait AddressConversion<T: frame_system::Config> {
-	fn convert(evm_public_key: &[u8; 33]) -> Result<T::AccountId, ()>;
+	fn convert(evm_public_key: &EvmPublicKey) -> Result<T::AccountId, ()>;
 }
 
 pub struct DefaultAddressConverter<T: frame_system::Config>(PhantomData<T>);
 impl <T> AddressConversion<T> for DefaultAddressConverter<T>
 	where T: frame_system::Config<AccountId = sp_runtime::AccountId32> {
-	fn convert(evm_public_key: &[u8; 33]) -> Result<T::AccountId, ()> {
+	fn convert(evm_public_key: &EvmPublicKey) -> Result<T::AccountId, ()> {
 		T::AccountId::decode(&mut &blake2_256(evm_public_key)[..]).map_err(|_err| ())
 	}
 }
@@ -183,7 +186,7 @@ pub mod pallet {
 		BalanceOf<T>: FixedPointOperand,
 		<T as frame_system::Config>::RuntimeCall:
 			Dispatchable<Info = DispatchInfo, PostInfo = PostDispatchInfo>,
-		<T as frame_system::Config>::AccountId: From<[u8; 32]> + Into<[u8; 32]>,
+		<T as frame_system::Config>::AccountId: From<AccountId32Bytes> + Into<AccountId32Bytes>,
 		T: frame_system::Config<AccountId = sp_runtime::AccountId32>,
 	{
 		type Call = Call<T>;
@@ -344,7 +347,7 @@ pub mod pallet {
 			who: T::AccountId,
 			call: Box<<T as Config>::RuntimeCall>,
 			nonce: Nonce,
-			#[allow(unused_variables)] signature: [u8; 65],
+			#[allow(unused_variables)] signature: EIP712Signature,
 			tip: Option<PaymentBalanceOf<T>>,
 		) -> DispatchResult {
 			// This is an unsigned transaction
