@@ -179,6 +179,7 @@ impl pallet_evm_account_mapping::Config for Test {
 	type RuntimeEvent = RuntimeEvent;
 	type RuntimeCall = RuntimeCall;
 	type Currency = Balances;
+	type AddressConverter = pallet_evm_account_mapping::DefaultAddressConverter<Test>;
 	type ServiceFee = ConstU128<1000>;
 	type OnUnbalancedForServiceFee = ();
 	type CallFilter = frame_support::traits::Everything;

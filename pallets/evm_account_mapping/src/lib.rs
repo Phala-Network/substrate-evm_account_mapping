@@ -47,6 +47,8 @@ macro_rules! log {
 	};
 }
 
+use codec::Decode;
+use core::marker::PhantomData;
 use frame_support::{
 	dispatch::{DispatchInfo, GetDispatchInfo, PostDispatchInfo, RawOrigin},
 	traits::{
@@ -72,6 +74,18 @@ pub type EIP712VerifyingContractAddress = sp_core::H160;
 
 pub type Nonce = u64;
 pub type Keccak256Signature = [u8; 32];
+
+pub trait AddressConversion<T: frame_system::Config> {
+	fn convert(evm_public_key: &[u8; 33]) -> Result<T::AccountId, ()>;
+}
+
+pub struct DefaultAddressConverter<T: frame_system::Config>(PhantomData<T>);
+impl <T> AddressConversion<T> for DefaultAddressConverter<T>
+	where T: frame_system::Config<AccountId = sp_runtime::AccountId32> {
+	fn convert(evm_public_key: &[u8; 33]) -> Result<T::AccountId, ()> {
+		T::AccountId::decode(&mut &blake2_256(evm_public_key)[..]).map_err(|_err| ())
+	}
+}
 
 #[frame_support::pallet]
 pub mod pallet {
@@ -103,6 +117,8 @@ pub mod pallet {
 
 		/// The system's currency for payment.
 		type Currency: InspectFungible<Self::AccountId> + Currency<Self::AccountId>;
+
+		type AddressConverter: AddressConversion<Self>;
 
 		#[pallet::constant]
 		type ServiceFee: Get<BalanceOf<Self>>;
@@ -199,8 +215,7 @@ pub mod pallet {
 
 			// Deserialize the actual caller
 			let decoded_account =
-				T::AccountId::decode(
-					&mut &blake2_256(&recovered_public_key)[..]).map_err(|_err| InvalidTransaction::Call)?;
+				<T as Config>::AddressConverter::convert(&recovered_public_key).map_err(|_err| InvalidTransaction::Call)?;
 			if who != &decoded_account {
 				return Err(InvalidTransaction::BadSigner.into())
 			}
