@@ -79,14 +79,30 @@ pub type EvmPublicKey = [u8; 33];
 pub type Keccak256Signature = [u8; 32];
 
 pub trait AddressConversion<T: frame_system::Config> {
-	fn convert(evm_public_key: &EvmPublicKey) -> Result<T::AccountId, ()>;
+	fn try_convert(evm_public_key: &EvmPublicKey) -> Option<T::AccountId>;
 }
 
-pub struct DefaultAddressConverter<T: frame_system::Config>(PhantomData<T>);
-impl <T> AddressConversion<T> for DefaultAddressConverter<T>
+pub struct SubstrateAddressConverter<T: frame_system::Config>(PhantomData<T>);
+impl <T> AddressConversion<T> for SubstrateAddressConverter<T>
 	where T: frame_system::Config<AccountId = sp_runtime::AccountId32> {
-	fn convert(evm_public_key: &EvmPublicKey) -> Result<T::AccountId, ()> {
-		T::AccountId::decode(&mut &blake2_256(evm_public_key)[..]).map_err(|_err| ())
+	fn try_convert(evm_public_key: &EvmPublicKey) -> Option<T::AccountId> {
+		T::AccountId::decode(&mut &blake2_256(evm_public_key)[..]).ok()
+	}
+}
+
+pub struct EvmTransparentConverter<T: frame_system::Config>(PhantomData<T>);
+impl <T> AddressConversion<T> for EvmTransparentConverter<T>
+	where T: frame_system::Config<AccountId = sp_runtime::AccountId32> {
+	fn try_convert(evm_public_key: &EvmPublicKey) -> Option<T::AccountId> {
+		let h32 = sp_core::H256(sp_core::hashing::keccak_256(evm_public_key));
+		let h20 = sp_core::H160::from(h32);
+		let postfix = b"@evm_address";
+
+		let mut raw_account: AccountId32Bytes = [0; 32];
+		raw_account[..20].copy_from_slice(h20.as_bytes());
+		raw_account[20..].copy_from_slice(postfix);
+
+		Some(T::AccountId::from(raw_account))
 	}
 }
 
@@ -217,8 +233,10 @@ pub mod pallet {
 			};
 
 			// Deserialize the actual caller
-			let decoded_account =
-				<T as Config>::AddressConverter::convert(&recovered_public_key).map_err(|_err| InvalidTransaction::Call)?;
+			let Some(decoded_account) =
+				<T as Config>::AddressConverter::try_convert(&recovered_public_key) else {
+				return Err(InvalidTransaction::Call.into())
+			};
 			if who != &decoded_account {
 				return Err(InvalidTransaction::BadSigner.into())
 			}
