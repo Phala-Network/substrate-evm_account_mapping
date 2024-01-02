@@ -75,17 +75,25 @@ pub type EIP712Signature = [u8; 65];
 
 pub type Nonce = u64;
 pub type AccountId32Bytes = [u8; 32];
-pub type EvmPublicKey = [u8; 33];
 pub type Keccak256Signature = [u8; 32];
 
+pub enum Secp256K1PublicKeyForm {
+	Compressed,
+	Uncompressed,
+}
+
 pub trait AddressConversion<T: frame_system::Config> {
-	fn try_convert(evm_public_key: &EvmPublicKey) -> Option<T::AccountId>;
+	const SECP256K1_PUBLIC_KEY_FORM: Secp256K1PublicKeyForm;
+
+	fn try_convert(evm_public_key: &[u8]) -> Option<T::AccountId>;
 }
 
 pub struct SubstrateAddressConverter<T: frame_system::Config>(PhantomData<T>);
 impl <T> AddressConversion<T> for SubstrateAddressConverter<T>
 	where T: frame_system::Config<AccountId = sp_runtime::AccountId32> {
-	fn try_convert(evm_public_key: &EvmPublicKey) -> Option<T::AccountId> {
+	const SECP256K1_PUBLIC_KEY_FORM: Secp256K1PublicKeyForm = Secp256K1PublicKeyForm::Compressed;
+
+	fn try_convert(evm_public_key: &[u8]) -> Option<T::AccountId> {
 		T::AccountId::decode(&mut &blake2_256(evm_public_key)[..]).ok()
 	}
 }
@@ -93,7 +101,9 @@ impl <T> AddressConversion<T> for SubstrateAddressConverter<T>
 pub struct EvmTransparentConverter<T: frame_system::Config>(PhantomData<T>);
 impl <T> AddressConversion<T> for EvmTransparentConverter<T>
 	where T: frame_system::Config<AccountId = sp_runtime::AccountId32> {
-	fn try_convert(evm_public_key: &EvmPublicKey) -> Option<T::AccountId> {
+	const SECP256K1_PUBLIC_KEY_FORM: Secp256K1PublicKeyForm = Secp256K1PublicKeyForm::Uncompressed;
+
+	fn try_convert(evm_public_key: &[u8]) -> Option<T::AccountId> {
 		let h32 = sp_core::H256(sp_core::hashing::keccak_256(evm_public_key));
 		let h20 = sp_core::H160::from(h32);
 		let postfix = b"@evm_address";
@@ -226,9 +236,17 @@ pub mod pallet {
 			// Check the signature and get the public key
 			let call_data = <T as Config>::RuntimeCall::encode(call);
 			let message_hash = Self::eip712_message_hash(who.clone(), &call_data, *nonce);
-			let Ok(recovered_public_key) =
-				sp_io::crypto::secp256k1_ecdsa_recover_compressed(signature, &message_hash)
-			else {
+
+			let Ok(recovered_public_key) = (match <T as Config>::AddressConverter::SECP256K1_PUBLIC_KEY_FORM {
+				Secp256K1PublicKeyForm::Compressed => {
+					sp_io::crypto::secp256k1_ecdsa_recover_compressed(signature, &message_hash)
+						.map(|i| i.to_vec())
+				},
+				Secp256K1PublicKeyForm::Uncompressed => {
+					sp_io::crypto::secp256k1_ecdsa_recover(signature, &message_hash)
+						.map(|i| i.to_vec())
+				}
+			}) else {
 				return Err(InvalidTransaction::Call.into())
 			};
 
