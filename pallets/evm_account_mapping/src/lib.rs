@@ -47,17 +47,15 @@ macro_rules! log {
 	};
 }
 
-use frame_support::{
-	dispatch::{DispatchInfo, GetDispatchInfo, PostDispatchInfo, RawOrigin},
-	traits::{
-		tokens::{Fortitude, Preservation},
-		fungible::Inspect as InspectFungible,
-		Contains, Imbalance, OriginTrait,
-		Currency,
-	},
-	weights::Weight,
-};
+use codec::Decode;
+use frame_support::{dispatch::{DispatchInfo, GetDispatchInfo, PostDispatchInfo, RawOrigin}, Parameter, traits::{
+	tokens::{Fortitude, Preservation},
+	fungible::Inspect as InspectFungible,
+	Contains, Imbalance, OriginTrait,
+	Currency,
+}, weights::Weight};
 use pallet_transaction_payment::OnChargeTransaction;
+use sp_core::crypto::AccountId32;
 use sp_io::hashing::blake2_256;
 use sp_runtime::{traits::Dispatchable, FixedPointOperand};
 
@@ -69,9 +67,48 @@ type BalanceOf<T> = <<T as Config>::Currency as Currency<<T as frame_system::Con
 type NegativeImbalanceOf<T> = <<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::NegativeImbalance;
 pub type EIP712ChainID = sp_core::U256;
 pub type EIP712VerifyingContractAddress = sp_core::H160;
+pub type EIP712Signature = [u8; 65];
 
 pub type Nonce = u64;
+pub type AccountId32Bytes = [u8; 32];
 pub type Keccak256Signature = [u8; 32];
+
+pub enum Secp256K1PublicKeyForm {
+	Compressed,
+	Uncompressed,
+}
+
+pub trait AddressConversion<AccountId>: Sized {
+	const SECP256K1_PUBLIC_KEY_FORM: Secp256K1PublicKeyForm;
+
+	fn try_convert(evm_public_key: &[u8]) -> Option<AccountId>;
+}
+
+pub struct SubstrateAddressConverter;
+impl AddressConversion<AccountId32> for SubstrateAddressConverter {
+	const SECP256K1_PUBLIC_KEY_FORM: Secp256K1PublicKeyForm = Secp256K1PublicKeyForm::Compressed;
+
+	fn try_convert(evm_public_key: &[u8]) -> Option<AccountId32> {
+		AccountId32::decode(&mut &blake2_256(evm_public_key)[..]).ok()
+	}
+}
+
+pub struct EvmTransparentConverter;
+impl AddressConversion<AccountId32> for EvmTransparentConverter {
+	const SECP256K1_PUBLIC_KEY_FORM: Secp256K1PublicKeyForm = Secp256K1PublicKeyForm::Uncompressed;
+
+	fn try_convert(evm_public_key: &[u8]) -> Option<AccountId32> {
+		let h32 = sp_core::H256(sp_core::hashing::keccak_256(&evm_public_key[1..]));
+		let h20 = sp_core::H160::from(h32);
+		let postfix = b"@evm_address";
+
+		let mut raw_account: AccountId32Bytes = [0; 32];
+		raw_account[..20].copy_from_slice(h20.as_bytes());
+		raw_account[20..].copy_from_slice(postfix);
+
+		Some(AccountId32::from(raw_account))
+	}
+}
 
 #[frame_support::pallet]
 pub mod pallet {
@@ -103,6 +140,8 @@ pub mod pallet {
 
 		/// The system's currency for payment.
 		type Currency: InspectFungible<Self::AccountId> + Currency<Self::AccountId>;
+
+		type AddressConverter: AddressConversion<Self::AccountId>;
 
 		#[pallet::constant]
 		type ServiceFee: Get<BalanceOf<Self>>;
@@ -167,8 +206,8 @@ pub mod pallet {
 		BalanceOf<T>: FixedPointOperand,
 		<T as frame_system::Config>::RuntimeCall:
 			Dispatchable<Info = DispatchInfo, PostInfo = PostDispatchInfo>,
-		<T as frame_system::Config>::AccountId: From<[u8; 32]> + Into<[u8; 32]>,
-		T: frame_system::Config<AccountId = sp_runtime::AccountId32>,
+		<T as frame_system::Config>::AccountId: From<AccountId32Bytes> + Into<AccountId32Bytes>,
+		T: frame_system::Config<AccountId = AccountId32>,
 	{
 		type Call = Call<T>;
 
@@ -191,16 +230,25 @@ pub mod pallet {
 			// Check the signature and get the public key
 			let call_data = <T as Config>::RuntimeCall::encode(call);
 			let message_hash = Self::eip712_message_hash(who.clone(), &call_data, *nonce);
-			let Ok(recovered_public_key) =
-				sp_io::crypto::secp256k1_ecdsa_recover_compressed(signature, &message_hash)
-			else {
+
+			let Ok(recovered_public_key) = (match <T as Config>::AddressConverter::SECP256K1_PUBLIC_KEY_FORM {
+				Secp256K1PublicKeyForm::Compressed => {
+					sp_io::crypto::secp256k1_ecdsa_recover_compressed(signature, &message_hash)
+						.map(|i| i.to_vec())
+				},
+				Secp256K1PublicKeyForm::Uncompressed => {
+					sp_io::crypto::secp256k1_ecdsa_recover(signature, &message_hash)
+						.map(|i| i.to_vec())
+				}
+			}) else {
 				return Err(InvalidTransaction::Call.into())
 			};
 
 			// Deserialize the actual caller
-			let decoded_account =
-				T::AccountId::decode(
-					&mut &blake2_256(&recovered_public_key)[..]).map_err(|_err| InvalidTransaction::Call)?;
+			let Some(decoded_account) =
+				<T as Config>::AddressConverter::try_convert(&recovered_public_key) else {
+				return Err(InvalidTransaction::Call.into())
+			};
 			if who != &decoded_account {
 				return Err(InvalidTransaction::BadSigner.into())
 			}
@@ -329,7 +377,7 @@ pub mod pallet {
 			who: T::AccountId,
 			call: Box<<T as Config>::RuntimeCall>,
 			nonce: Nonce,
-			#[allow(unused_variables)] signature: [u8; 65],
+			#[allow(unused_variables)] signature: EIP712Signature,
 			tip: Option<PaymentBalanceOf<T>>,
 		) -> DispatchResult {
 			// This is an unsigned transaction
