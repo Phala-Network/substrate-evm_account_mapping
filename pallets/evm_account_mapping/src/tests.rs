@@ -22,6 +22,7 @@ use frame_support::assert_ok;
 
 use sp_core::crypto::Ss58Codec;
 use sp_runtime::traits::TrailingZeroInput;
+use crate::AddressConversion;
 
 #[test]
 fn it_works() {
@@ -53,6 +54,56 @@ fn it_works() {
 		// Assert that the correct event was deposited
 		// System::assert_last_event(Event::SomethingStored { something: 42, who: 1 }.into());
 	});
+}
+
+#[test]
+fn evm_transparent_converter_works() {
+	// Compressed 029df1e69b8b7c2da2efe0069dc141c2cec0317bf3fd135abaeb69ee33801f5970
+	let public_key = hex::decode(
+		"049df1e69b8b7c2da2efe0069dc141c2cec0317bf3fd135abaeb69ee33801f597024dc8558dbe54a0328ceaa081387a5e1c5749247266fe53dde4ba7ddbf43eae6"
+	).expect("Valid");
+
+	let h32 = sp_core::H256(sp_core::hashing::keccak_256(&public_key[1..]));
+	let h20 = sp_core::H160::from(h32);
+
+	let mut raw_account: [u8; 32] = [0; 32];
+	raw_account[..20].copy_from_slice(h20.as_bytes());
+	raw_account[20..].copy_from_slice(b"@evm_address");
+	let account_id = sp_core::crypto::AccountId32::from(raw_account);
+
+	assert_eq!(
+		hex::encode(&account_id),
+		format!(
+			"77bb3d64ea13e4f0beafdd5d92508d4643bb09cb{}",
+			hex::encode(b"@evm_address")
+		)
+	);
+
+	let account_id = crate::EvmTransparentConverter::try_convert(&public_key).expect("Convertable");
+	assert_eq!(
+		hex::encode(&account_id),
+		format!(
+			"77bb3d64ea13e4f0beafdd5d92508d4643bb09cb{}",
+			hex::encode(b"@evm_address")
+		)
+	);
+	assert_eq!(
+		account_id.to_string(),
+		"5EmhBEe8vsSfqYseKctWsaQqNKCF9FFao6Mqa9hNfcdF25oE"
+	);
+}
+
+#[test]
+fn evm_substrate_address_converter_works() {
+	let public_key = hex::decode(
+		"027cf2fa7bfe66adad4149481ff86794ce7e1ab2f7ed615ad3918f91581d2c00f1"
+	).expect("Valid");
+	let account_id = crate::SubstrateAddressConverter::try_convert(&public_key).expect("Convertable");
+
+	assert_eq!(
+		account_id.to_string(),
+		"5DT96geTS2iLpkH8fAhYAAphNpxddKCV36s5ShVFavf1xQiF"
+	);
 }
 
 #[test]

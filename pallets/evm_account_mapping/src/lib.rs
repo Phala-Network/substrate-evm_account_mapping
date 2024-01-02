@@ -48,18 +48,14 @@ macro_rules! log {
 }
 
 use codec::Decode;
-use core::marker::PhantomData;
-use frame_support::{
-	dispatch::{DispatchInfo, GetDispatchInfo, PostDispatchInfo, RawOrigin},
-	traits::{
-		tokens::{Fortitude, Preservation},
-		fungible::Inspect as InspectFungible,
-		Contains, Imbalance, OriginTrait,
-		Currency,
-	},
-	weights::Weight,
-};
+use frame_support::{dispatch::{DispatchInfo, GetDispatchInfo, PostDispatchInfo, RawOrigin}, Parameter, traits::{
+	tokens::{Fortitude, Preservation},
+	fungible::Inspect as InspectFungible,
+	Contains, Imbalance, OriginTrait,
+	Currency,
+}, weights::Weight};
 use pallet_transaction_payment::OnChargeTransaction;
+use sp_core::crypto::AccountId32;
 use sp_io::hashing::blake2_256;
 use sp_runtime::{traits::Dispatchable, FixedPointOperand};
 
@@ -82,29 +78,27 @@ pub enum Secp256K1PublicKeyForm {
 	Uncompressed,
 }
 
-pub trait AddressConversion<T: frame_system::Config> {
+pub trait AddressConversion<AccountId>: Sized {
 	const SECP256K1_PUBLIC_KEY_FORM: Secp256K1PublicKeyForm;
 
-	fn try_convert(evm_public_key: &[u8]) -> Option<T::AccountId>;
+	fn try_convert(evm_public_key: &[u8]) -> Option<AccountId>;
 }
 
-pub struct SubstrateAddressConverter<T: frame_system::Config>(PhantomData<T>);
-impl <T> AddressConversion<T> for SubstrateAddressConverter<T>
-	where T: frame_system::Config<AccountId = sp_runtime::AccountId32> {
+pub struct SubstrateAddressConverter;
+impl AddressConversion<AccountId32> for SubstrateAddressConverter {
 	const SECP256K1_PUBLIC_KEY_FORM: Secp256K1PublicKeyForm = Secp256K1PublicKeyForm::Compressed;
 
-	fn try_convert(evm_public_key: &[u8]) -> Option<T::AccountId> {
-		T::AccountId::decode(&mut &blake2_256(evm_public_key)[..]).ok()
+	fn try_convert(evm_public_key: &[u8]) -> Option<AccountId32> {
+		AccountId32::decode(&mut &blake2_256(evm_public_key)[..]).ok()
 	}
 }
 
-pub struct EvmTransparentConverter<T: frame_system::Config>(PhantomData<T>);
-impl <T> AddressConversion<T> for EvmTransparentConverter<T>
-	where T: frame_system::Config<AccountId = sp_runtime::AccountId32> {
+pub struct EvmTransparentConverter;
+impl AddressConversion<AccountId32> for EvmTransparentConverter {
 	const SECP256K1_PUBLIC_KEY_FORM: Secp256K1PublicKeyForm = Secp256K1PublicKeyForm::Uncompressed;
 
-	fn try_convert(evm_public_key: &[u8]) -> Option<T::AccountId> {
-		let h32 = sp_core::H256(sp_core::hashing::keccak_256(evm_public_key));
+	fn try_convert(evm_public_key: &[u8]) -> Option<AccountId32> {
+		let h32 = sp_core::H256(sp_core::hashing::keccak_256(&evm_public_key[1..]));
 		let h20 = sp_core::H160::from(h32);
 		let postfix = b"@evm_address";
 
@@ -112,7 +106,7 @@ impl <T> AddressConversion<T> for EvmTransparentConverter<T>
 		raw_account[..20].copy_from_slice(h20.as_bytes());
 		raw_account[20..].copy_from_slice(postfix);
 
-		Some(T::AccountId::from(raw_account))
+		Some(AccountId32::from(raw_account))
 	}
 }
 
@@ -147,7 +141,7 @@ pub mod pallet {
 		/// The system's currency for payment.
 		type Currency: InspectFungible<Self::AccountId> + Currency<Self::AccountId>;
 
-		type AddressConverter: AddressConversion<Self>;
+		type AddressConverter: AddressConversion<Self::AccountId>;
 
 		#[pallet::constant]
 		type ServiceFee: Get<BalanceOf<Self>>;
@@ -213,7 +207,7 @@ pub mod pallet {
 		<T as frame_system::Config>::RuntimeCall:
 			Dispatchable<Info = DispatchInfo, PostInfo = PostDispatchInfo>,
 		<T as frame_system::Config>::AccountId: From<AccountId32Bytes> + Into<AccountId32Bytes>,
-		T: frame_system::Config<AccountId = sp_runtime::AccountId32>,
+		T: frame_system::Config<AccountId = AccountId32>,
 	{
 		type Call = Call<T>;
 
