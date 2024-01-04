@@ -98,7 +98,7 @@ impl AddressConversion<AccountId32> for EvmTransparentConverter {
 	const SECP256K1_PUBLIC_KEY_FORM: Secp256K1PublicKeyForm = Secp256K1PublicKeyForm::Uncompressed;
 
 	fn try_convert(evm_public_key: &[u8]) -> Option<AccountId32> {
-		let h32 = sp_core::H256(sp_io::hashing::keccak_256(&evm_public_key[1..]));
+		let h32 = sp_core::H256(sp_io::hashing::keccak_256(&evm_public_key));
 		let h20 = sp_core::H160::from(h32);
 		let postfix = b"@evm_address";
 
