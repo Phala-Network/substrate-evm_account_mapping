@@ -1,6 +1,9 @@
-import { cryptoWaitReady, secp256k1PairFromSeed, encodeAddress, blake2AsU8a } from "https://deno.land/x/polkadot/util-crypto/mod.ts"
-import { Keyring } from "https://deno.land/x/polkadot/keyring/mod.ts"
-import { hexToU8a, u8aToHex } from "https://deno.land/x/polkadot/util/mod.ts"
+import {
+	cryptoWaitReady,
+	secp256k1PairFromSeed,
+	encodeAddress, keccak256AsU8a,
+} from "https://deno.land/x/polkadot/util-crypto/mod.ts"
+import { hexToU8a, u8aToHex, stringToU8a, } from "https://deno.land/x/polkadot/util/mod.ts"
 
 await cryptoWaitReady().catch((e) => {
 	console.error(e.message);
@@ -46,15 +49,14 @@ if (subPublicKey !== u8aToHex(ethCompressedPublicKey)) {
 	Deno.exit(1)
 }
 
-const subKeyring = new Keyring({ type: "ecdsa", ss58Format })
-const subKeyringPair = subKeyring.createFromPair(subKeyPair)
-const subAddress = subKeyringPair.address
+const subAddressFromPublicKey = function () {
+	const h32 = keccak256AsU8a(ethPublicKey.subarray(1))
+	const h20 = h32.slice(-20)
+	const postfix = stringToU8a('@evm_address')
+	const raw = new Uint8Array([...h20, ...postfix])
 
-const subAddressFromPublicKey = encodeAddress(blake2AsU8a(ethCompressedPublicKey), ss58Format)
-if (subAddress !== subAddressFromPublicKey) {
-	console.error(`${subAddress} != 0x${subAddressFromPublicKey}`)
-	Deno.exit(1)
-}
+	return encodeAddress(raw, ss58Format)
+}()
 
 // Prepare the meta call
 
