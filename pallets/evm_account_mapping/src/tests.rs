@@ -60,10 +60,10 @@ fn it_works() {
 fn evm_transparent_converter_works() {
 	// Compressed 029df1e69b8b7c2da2efe0069dc141c2cec0317bf3fd135abaeb69ee33801f5970
 	let public_key = hex::decode(
-		"049df1e69b8b7c2da2efe0069dc141c2cec0317bf3fd135abaeb69ee33801f597024dc8558dbe54a0328ceaa081387a5e1c5749247266fe53dde4ba7ddbf43eae6"
+		"9df1e69b8b7c2da2efe0069dc141c2cec0317bf3fd135abaeb69ee33801f597024dc8558dbe54a0328ceaa081387a5e1c5749247266fe53dde4ba7ddbf43eae6"
 	).expect("Valid");
 
-	let h32 = sp_core::H256(sp_core::hashing::keccak_256(&public_key[1..]));
+	let h32 = sp_core::H256(sp_core::hashing::keccak_256(&public_key));
 	let h20 = sp_core::H160::from(h32);
 
 	let mut raw_account: [u8; 32] = [0; 32];
