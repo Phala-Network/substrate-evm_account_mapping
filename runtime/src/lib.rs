@@ -61,6 +61,8 @@ pub type Signature = MultiSignature;
 /// to the public key of our transaction signing scheme.
 pub type AccountId = <<Signature as Verify>::Signer as IdentifyAccount>::AccountId;
 
+pub type AccountPublic = <Signature as Verify>::Signer;
+
 /// Balance of an account.
 pub type Balance = u128;
 
@@ -285,10 +287,13 @@ impl pallet_evm_account_mapping::Config for Runtime {
 	type ServiceFee = ConstU128<10000000000>;
 	type OnUnbalancedForServiceFee = DealWithServiceFee;
 	type CallFilter = frame_support::traits::Everything;
+	type SponsoredCallFilter = frame_support::traits::Everything;
 	type EIP712Name = EIP712Name;
 	type EIP712Version = EIP712Version;
 	type EIP712ChainID = EIP712ChainID;
 	type EIP712VerifyingContractAddress = EIP712VerifyingContractAddress;
+	type OffchainSignature = Signature;
+	type OffchainPublic = AccountPublic;
 	type WeightInfo = pallet_evm_account_mapping::weights::SubstrateWeight<Runtime>;
 }
 

@@ -33,7 +33,7 @@ fn it_works() {
 		let call_data = hex::decode("00071448656c6c6f").expect("Valid"); // system.remarkWithEvent("Hello")
 		let call = RuntimeCall::decode(&mut TrailingZeroInput::new(&call_data)).expect("Valid");
 		let nonce: u64 = 0;
-		let signature: [u8; 65] = hex::decode("37cb6ff8e296d7e476ee13a6cfababe788217519d428fcc723b482dc97cb4d1359a8d1c020fe3cebc1d06a67e61b1f0e296739cecacc640b0ba48e8a7555472e1b").expect("Decodable").try_into().expect("Valid");
+		let signature: [u8; 65] = hex::decode("45b10ab26c36fa1f5c48b1e98413a1710617f5df5bf0ad9d6c6ae357e27d6bb8210a8a4320a84b9663d3046e980daf0a1c54821c0f2809f6c1cbb98b229d33471b").expect("Decodable").try_into().expect("Valid");
 
 		set_balance(account.clone(), DOLLARS);
 
@@ -46,8 +46,9 @@ fn it_works() {
 				account,
 				Box::<RuntimeCall>::new(call),
 				nonce,
+				None,
+				None,
 				signature,
-				0u128.into()
 			)
 		);
 
@@ -129,7 +130,7 @@ fn eip712() {
 	let domain_separator = eip712_domain.separator();
 
 	let type_hash = sp_io::hashing::keccak_256(
-		"SubstrateCall(string who,bytes callData,uint64 nonce)".as_bytes(),
+		"SubstrateCall(string who,bytes callData,uint64 nonce,uint128 tip,bytes preSignedCheque)".as_bytes(),
 	);
 	// Token::Uint(U256::from(keccak_256(&self.name)))
 	let who = "5DT96geTS2iLpkH8fAhYAAphNpxddKCV36s5ShVFavf1xQiF";
@@ -153,7 +154,7 @@ fn eip712() {
 	let bytes = crate::encode::abi::encode_packed(typed_data_hash_input);
 	let signing_message = sp_io::hashing::keccak_256(bytes.as_slice());
 
-	let signature: [u8; 65] = hex::decode("37cb6ff8e296d7e476ee13a6cfababe788217519d428fcc723b482dc97cb4d1359a8d1c020fe3cebc1d06a67e61b1f0e296739cecacc640b0ba48e8a7555472e1b").expect("Decodable").try_into().expect("Decodable");
+	let signature: [u8; 65] = hex::decode("45b10ab26c36fa1f5c48b1e98413a1710617f5df5bf0ad9d6c6ae357e27d6bb8210a8a4320a84b9663d3046e980daf0a1c54821c0f2809f6c1cbb98b229d33471b").expect("Decodable").try_into().expect("Decodable");
 
 	// Check the signature and get the public key
 	let recovered_public_key =

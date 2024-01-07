@@ -36,7 +36,7 @@ pub mod weights;
 pub use weights::WeightInfo;
 
 /// The log target of this pallet.
-pub const LOG_TARGET: &str = "runtime::account_abstraction";
+pub const LOG_TARGET: &str = "runtime::evm_account_mapping";
 
 // Syntactic sugar for logging.
 #[macro_export]
@@ -50,17 +50,26 @@ macro_rules! log {
 }
 
 use alloc::{boxed::Box, vec::Vec};
-use codec::Decode;
-use frame_support::{dispatch::{DispatchInfo, GetDispatchInfo, PostDispatchInfo, RawOrigin}, Parameter, traits::{
-	tokens::{Fortitude, Preservation},
-	fungible::Inspect as InspectFungible,
-	Contains, Imbalance, OriginTrait,
-	Currency,
-}, weights::Weight};
+use codec::{Decode, Encode};
+use scale_info::TypeInfo;
+use frame_support::{
+	dispatch::{DispatchInfo, GetDispatchInfo, PostDispatchInfo, RawOrigin},
+	traits::{
+		tokens::{Fortitude, Preservation},
+		fungible::Inspect as InspectFungible,
+		Contains, Imbalance, OriginTrait,
+		Currency, OnUnbalanced
+	},
+	weights::Weight,
+	Parameter,
+};
 use pallet_transaction_payment::OnChargeTransaction;
 use sp_core::crypto::AccountId32;
 use sp_io::hashing::blake2_256;
-use sp_runtime::{traits::Dispatchable, FixedPointOperand};
+use sp_runtime::{
+	traits::{IdentifyAccount, Dispatchable, Verify, SaturatedConversion, Hash},
+	FixedPointOperand, RuntimeDebug,
+};
 
 type PaymentOnChargeTransaction<T> = <T as pallet_transaction_payment::Config>::OnChargeTransaction;
 
@@ -113,10 +122,33 @@ impl AddressConversion<AccountId32> for EvmTransparentConverter {
 	}
 }
 
+#[derive(Clone, Eq, PartialEq, Encode, Decode, RuntimeDebug, TypeInfo)]
+pub struct Cheque<BlockNumber, Balance, Hash, AccountId> {
+	/// The cheque only available before or at the block number.
+	pub deadline: BlockNumber,
+	/// The cheque only available when the sponsor's balance greater or equal than the value.
+	pub sponsor_minimum_balance: Balance,
+	/// Restrict the cheque to a particular account.
+	pub only_account: Option<AccountId>,
+	/// Restrict the caller's hash must equal the value.
+	pub only_account_nonce: Option<Nonce>,
+	/// Restrict the cheque to a particular call.
+	pub only_call_hash: Option<Hash>,
+	/// Sponsor max tip amount, set 0 if you don't want to sponsor any tip
+	pub sponsor_maximum_tip: Balance,
+}
+
+#[derive(Clone, Eq, PartialEq, Encode, Decode, RuntimeDebug, TypeInfo)]
+pub struct PreSignedCheque<BlockNumber, Balance, Hash, AccountId, Signature> {
+	pub cheque: Cheque<BlockNumber, Balance, Hash, AccountId>,
+	pub signature: Signature,
+	pub signer: AccountId,
+}
+
 #[frame_support::pallet]
 pub mod pallet {
 	use super::*;
-	use frame_support::{pallet_prelude::*, traits::OnUnbalanced};
+	use frame_support::pallet_prelude::*;
 	use frame_system::pallet_prelude::*;
 
 	#[pallet::pallet]
@@ -152,6 +184,8 @@ pub mod pallet {
 
 		type CallFilter: Contains<<Self as frame_system::Config>::RuntimeCall>;
 
+		type SponsoredCallFilter: Contains<<Self as frame_system::Config>::RuntimeCall>;
+
 		#[pallet::constant]
 		type EIP712Name: Get<Vec<u8>>;
 
@@ -163,6 +197,16 @@ pub mod pallet {
 
 		#[pallet::constant]
 		type EIP712VerifyingContractAddress: Get<EIP712VerifyingContractAddress>;
+
+		/// Off-Chain signature type.
+		///
+		/// Can verify whether an `Self::OffchainPublic` created a signature.
+		type OffchainSignature: Verify<Signer = Self::OffchainPublic> + Parameter;
+
+		/// Off-Chain public key.
+		///
+		/// Must identify as an on-chain `Self::AccountId`.
+		type OffchainPublic: IdentifyAccount<AccountId = Self::AccountId>;
 
 		/// Type representing the weight of this pallet
 		type WeightInfo: WeightInfo;
@@ -222,16 +266,16 @@ pub mod pallet {
 				ref who,
 				ref call,
 				ref nonce,
-				ref signature,
 				ref tip,
-			} = unsigned_call
-			else {
+				ref pre_signed_cheque,
+				ref signature,
+			} = unsigned_call else {
 				return Err(InvalidTransaction::Call.into())
 			};
 
 			// Check the signature and get the public key
 			let call_data = <T as Config>::RuntimeCall::encode(call);
-			let message_hash = Self::eip712_message_hash(who.clone(), &call_data, *nonce);
+			let message_hash = Self::eip712_message_hash(&who, &call_data, nonce, tip, pre_signed_cheque);
 
 			let Ok(recovered_public_key) = (match <T as Config>::AddressConverter::SECP256K1_PUBLIC_KEY_FORM {
 				Secp256K1PublicKeyForm::Compressed => {
@@ -262,13 +306,13 @@ pub mod pallet {
 			// Skip frame_system::CheckEra<Runtime>
 
 			// frame_system::CheckNonce<Runtime>
-			let account_nonce = AccountNonce::<T>::get(who);
+			let account_nonce = AccountNonce::<T>::get(&who);
 			if nonce < &account_nonce {
 				return Err(InvalidTransaction::Stale.into())
 			}
-			let provides = (who, nonce).encode();
+			let provides = (who.clone(), nonce).encode();
 			let requires = if &account_nonce < nonce && nonce > &0u64 {
-				Some((who, nonce - 1).encode())
+				Some((who.clone(), nonce - 1).encode())
 			} else {
 				None
 			};
@@ -300,11 +344,71 @@ pub mod pallet {
 			// We can't get the actual size of the meta-tx itself,
 			// so we have to introducing service fee.
 			let service_fee = T::ServiceFee::get().saturated_into::<u128>();
-			let usable_balance_for_fees =
-				T::Currency::reducible_balance(who, Preservation::Preserve, Fortitude::Polite)
-					.saturated_into::<u128>();
-			if est_fee.saturating_add(service_fee) > usable_balance_for_fees {
-				return Err(InvalidTransaction::Payment.into())
+
+			if let Some(
+				PreSignedCheque {
+					cheque,
+					signature,
+					signer,
+				}
+			) = pre_signed_cheque {
+				let encoded_cheque = Encode::encode(&cheque);
+				if !signature.verify(&*encoded_cheque, signer) {
+					// NOTE: for security reasons modern UIs implicitly wrap the data requested to sign into
+					// <Bytes></Bytes>, that's why we support both wrapped and raw versions.
+					let prefix = b"<Bytes>";
+					let suffix = b"</Bytes>";
+					let mut wrapped: Vec<u8> = Vec::with_capacity(encoded_cheque.len() + prefix.len() + suffix.len());
+					wrapped.extend(prefix);
+					wrapped.extend(&encoded_cheque);
+					wrapped.extend(suffix);
+
+					if !signature.verify(&*wrapped, signer) {
+						return Err(InvalidTransaction::Payment.into())
+					}
+				}
+
+				if let Some(only_account) = &cheque.only_account {
+					if only_account != who {
+						return Err(InvalidTransaction::Payment.into())
+					}
+				}
+				if let Some(only_account_nonce) = &cheque.only_account_nonce {
+					if only_account_nonce != &account_nonce {
+						return Err(InvalidTransaction::Payment.into())
+					}
+				}
+
+				if let Some(only_call_hash) = cheque.only_call_hash {
+					if T::Hashing::hash(&call_data) != only_call_hash {
+						return Err(InvalidTransaction::Payment.into())
+					}
+				}
+
+				let now = frame_system::Pallet::<T>::block_number();
+				if cheque.deadline < now {
+					return Err(InvalidTransaction::Payment.into())
+				};
+
+				let usable_balance_for_fees =
+					T::Currency::reducible_balance(&signer, Preservation::Preserve, Fortitude::Polite)
+						.saturated_into::<u128>();
+				if est_fee.saturating_add(service_fee) > usable_balance_for_fees {
+					return Err(InvalidTransaction::Payment.into())
+				}
+				if cheque.sponsor_minimum_balance.saturated_into() > usable_balance_for_fees {
+					return Err(InvalidTransaction::Payment.into())
+				}
+				if cheque.sponsor_maximum_tip < tip {
+					return Err(InvalidTransaction::Payment.into())
+				}
+			} else {
+				let usable_balance_for_fees =
+					T::Currency::reducible_balance(&who, Preservation::Preserve, Fortitude::Polite)
+						.saturated_into::<u128>();
+				if est_fee.saturating_add(service_fee) > usable_balance_for_fees {
+					return Err(InvalidTransaction::Payment.into())
+				}
 			}
 
 			// Calculate priority
@@ -363,7 +467,7 @@ pub mod pallet {
 		BalanceOf<T>: FixedPointOperand,
 		<T as frame_system::Config>::RuntimeCall:
 			Dispatchable<Info = DispatchInfo, PostInfo = PostDispatchInfo>,
-		T: frame_system::Config<AccountId = sp_runtime::AccountId32>,
+		T: frame_system::Config<AccountId = AccountId32>,
 	{
 		/// Meta-transaction from EVM compatible chains
 		#[pallet::call_index(0)]
@@ -379,23 +483,34 @@ pub mod pallet {
 			who: T::AccountId,
 			call: Box<<T as Config>::RuntimeCall>,
 			nonce: Nonce,
-			#[allow(unused_variables)] signature: EIP712Signature,
 			tip: Option<PaymentBalanceOf<T>>,
+			pre_signed_cheque: Option<PreSignedCheque<BlockNumberFor<T>, PaymentBalanceOf<T>, T::Hash, T::AccountId, T::OffchainSignature>>,
+			#[allow(unused_variables)] signature: EIP712Signature,
 		) -> DispatchResult {
 			// This is an unsigned transaction
 			ensure_none(origin)?;
 
-			// We don't need to re-validate the signature here,
+			// We don't need to re-validate the `signature` here,
 			// because it already validated in `validate_unsigned` stage,
 			// and it should no way to skip.
 			// TODO: Confirm this.
+
+			// We don't need to re-validate the `pre_signed_cheque` here,
+			// because it already validated in `validate_unsigned` stage,
+			// and it should no way to skip.
+			// TODO: Confirm this.
+			let payer = if let Some(PreSignedCheque {ref signer, .. }) = pre_signed_cheque {
+				signer
+			} else {
+				&who
+			};
 
 			// It is possible that an account passed `validate_unsigned` check,
 			// but for some reason, its balance isn't enough for the service fee.
 			use frame_support::traits::tokens::{WithdrawReasons, ExistenceRequirement};
 			// NOTE: it is possible that the account doesn't have enough fee, which is a vulnerable.
 			let withdrawn = T::Currency::withdraw(
-				&who,
+				payer,
 				T::ServiceFee::get(),
 				WithdrawReasons::FEE,
 				ExistenceRequirement::KeepAlive
@@ -403,7 +518,7 @@ pub mod pallet {
 			let withdrawn_fee = withdrawn.peek();
 			T::OnUnbalancedForServiceFee::on_unbalanced(withdrawn);
 			Self::deposit_event(Event::ServiceFeePaid {
-				who: who.clone(),
+				who: payer.clone(),
 				actual_fee: withdrawn_fee,
 				expected_fee: T::ServiceFee::get(),
 			});
@@ -419,7 +534,13 @@ pub mod pallet {
 
 			// Call
 			let mut origin: T::RuntimeOrigin = RawOrigin::Signed(who.clone()).into();
-			origin.add_filter(T::CallFilter::contains);
+			if let Some(PreSignedCheque { ref cheque, .. }) = pre_signed_cheque {
+				if cheque.only_call_hash.is_none() {
+					origin.add_filter(T::SponsoredCallFilter::contains);
+				}
+			} else {
+				origin.add_filter(T::CallFilter::contains);
+			}
 			let len = call.encoded_size();
 			let info = call.get_dispatch_info();
 			let tip = tip.unwrap_or(0u32.into());
@@ -428,7 +549,7 @@ pub mod pallet {
 			// Add the service fee
 			let already_withdrawn =
 				<PaymentOnChargeTransaction<T> as OnChargeTransaction<T>>::withdraw_fee(
-					&who,
+					payer,
 					&(*call).clone().into(),
 					&info,
 					est_fee,
@@ -437,10 +558,8 @@ pub mod pallet {
 				.map_err(|_err| Error::<T>::PaymentError)?;
 
 			let call_result = call.dispatch(origin);
-			let post_info = match call_result {
-				Ok(post_info) => post_info,
-				Err(error_and_info) => error_and_info.post_info,
-			};
+			let post_info =
+				call_result.unwrap_or_else(|error_and_info| error_and_info.post_info);
 			// Deposit the call's result
 			Self::deposit_event(Event::CallDone { who: who.clone(), call_result });
 
@@ -449,15 +568,14 @@ pub mod pallet {
 			);
 			// frame/transaction-payment/src/payment.rs
 			<PaymentOnChargeTransaction<T> as OnChargeTransaction<T>>::correct_and_deposit_fee(
-				&who,
+				payer,
 				&info,
 				&post_info,
 				actual_fee,
 				tip,
 				already_withdrawn,
-			)
-			.map_err(|_err| Error::<T>::PaymentError)?;
-			Self::deposit_event(Event::TransactionFeePaid { who: who.clone(), actual_fee, tip });
+			).map_err(|_err| Error::<T>::PaymentError)?;
+			Self::deposit_event(Event::TransactionFeePaid { who: payer.clone(), actual_fee, tip });
 
 			Ok(())
 		}
@@ -465,12 +583,14 @@ pub mod pallet {
 
 	impl<T: Config> Pallet<T>
 	where
-		T: frame_system::Config<AccountId = sp_runtime::AccountId32>,
+		T: frame_system::Config<AccountId = AccountId32>,
 	{
 		pub(crate) fn eip712_message_hash(
-			who: T::AccountId,
+			who: &T::AccountId,
 			call_data: &[u8],
-			nonce: Nonce,
+			nonce: &Nonce,
+			tip: &Option<PaymentBalanceOf<T>>,
+			pre_signed_cheque: &Option<PreSignedCheque<BlockNumberFor<T>, PaymentBalanceOf<T>, T::Hash, T::AccountId, T::OffchainSignature>>,
 		) -> Keccak256Signature {
 			use alloc::vec;
 
@@ -485,19 +605,29 @@ pub mod pallet {
 			let domain_separator = eip712_domain.separator();
 
 			let type_hash = sp_io::hashing::keccak_256(
-				"SubstrateCall(string who,bytes callData,uint64 nonce)".as_bytes(),
+				"SubstrateCall(string who,bytes callData,uint64 nonce,uint128 tip,bytes preSignedCheque)".as_bytes(),
 			);
-			// Token::Uint(U256::from(keccak_256(&self.name)))
 			use sp_core::crypto::Ss58Codec;
 			let ss58_who = who.to_ss58check_with_version(T::SS58Prefix::get().into());
-			let hashed_call_data = sp_io::hashing::keccak_256(call_data);
-			let message_hash = sp_io::hashing::keccak_256(&ethabi::encode(&[
+			let mut message_tokens = vec![
 				ethabi::Token::FixedBytes(type_hash.to_vec()),
 				ethabi::Token::FixedBytes(sp_io::hashing::keccak_256(ss58_who.as_bytes()).to_vec()),
-				ethabi::Token::FixedBytes(hashed_call_data.to_vec()),
-				ethabi::Token::Uint(nonce.into()),
-			]));
+				ethabi::Token::FixedBytes(sp_io::hashing::keccak_256(call_data).to_vec()),
+				ethabi::Token::Uint((*nonce).into()),
+			];
+			if let Some(tip) = tip {
+				let tip = (*tip).saturated_into::<u128>();
+				message_tokens.push(
+					ethabi::Token::Uint(tip.into())
+				);
+			}
+			if let Some(pre_signed_cheque) = pre_signed_cheque {
+				message_tokens.push(
+					ethabi::Token::FixedBytes(sp_io::hashing::keccak_256(&Encode::encode(pre_signed_cheque)).to_vec())
+				);
+			}
 
+			let message_hash = sp_io::hashing::keccak_256(&ethabi::encode(&message_tokens));
 			let typed_data_hash_input = &vec![
 				crate::encode::SolidityDataType::String("\x19\x01"),
 				crate::encode::SolidityDataType::Bytes(&domain_separator),
