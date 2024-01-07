@@ -24,7 +24,7 @@ use crate::Pallet as ThisPallet;
 use frame_benchmarking::v2::*;
 use frame_system::RawOrigin;
 
-use codec::Decode;
+use scale_codec::Decode;
 use sp_core::crypto::Ss58Codec;
 use sp_runtime::traits::{Bounded, TrailingZeroInput};
 
@@ -48,12 +48,12 @@ mod benchmarks {
 		))
 		.expect("Valid");
 		let nonce: u64 = 0;
-		let signature: [u8; 65] = hex::decode("37cb6ff8e296d7e476ee13a6cfababe788217519d428fcc723b482dc97cb4d1359a8d1c020fe3cebc1d06a67e61b1f0e296739cecacc640b0ba48e8a7555472e1b").expect("Decodable").try_into().expect("Valid");
+		let signature: [u8; 65] = hex::decode("45b10ab26c36fa1f5c48b1e98413a1710617f5df5bf0ad9d6c6ae357e27d6bb8210a8a4320a84b9663d3046e980daf0a1c54821c0f2809f6c1cbb98b229d33471b").expect("Decodable").try_into().expect("Valid");
 
 		T::Currency::make_free_balance_be(&account, BalanceOf::<T>::max_value() / 2u32.into());
 
 		#[extrinsic_call]
-		_(RawOrigin::None, account, Box::new(call.into()), nonce, signature, None);
+		_(RawOrigin::None, account, Box::new(call.into()), nonce, None, None, signature,);
 
 		Ok(())
 	}

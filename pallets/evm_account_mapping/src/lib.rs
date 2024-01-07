@@ -50,24 +50,23 @@ macro_rules! log {
 }
 
 use alloc::{boxed::Box, vec::Vec};
-use codec::{Decode, Encode};
-use scale_info::TypeInfo;
+use scale_codec::{Decode, Encode};
 use frame_support::{
 	dispatch::{DispatchInfo, GetDispatchInfo, PostDispatchInfo, RawOrigin},
 	traits::{
-		tokens::{Fortitude, Preservation},
 		fungible::Inspect as InspectFungible,
-		Contains, Imbalance, OriginTrait,
-		Currency, OnUnbalanced
+		tokens::{Fortitude, Preservation},
+		Contains, Currency, Imbalance, OnUnbalanced, OriginTrait,
 	},
 	weights::Weight,
 	Parameter,
 };
 use pallet_transaction_payment::OnChargeTransaction;
+use scale_info::TypeInfo;
 use sp_core::crypto::AccountId32;
 use sp_io::hashing::blake2_256;
 use sp_runtime::{
-	traits::{IdentifyAccount, Dispatchable, Verify, SaturatedConversion, Hash},
+	traits::{Dispatchable, Hash, IdentifyAccount, SaturatedConversion, Verify},
 	FixedPointOperand, RuntimeDebug,
 };
 
@@ -75,8 +74,11 @@ type PaymentOnChargeTransaction<T> = <T as pallet_transaction_payment::Config>::
 
 type PaymentBalanceOf<T> = <<T as pallet_transaction_payment::Config>::OnChargeTransaction as OnChargeTransaction<T>>::Balance;
 
-type BalanceOf<T> = <<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
-type NegativeImbalanceOf<T> = <<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::NegativeImbalance;
+type BalanceOf<T> =
+	<<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
+type NegativeImbalanceOf<T> = <<T as Config>::Currency as Currency<
+	<T as frame_system::Config>::AccountId,
+>>::NegativeImbalance;
 pub type EIP712ChainID = sp_core::U256;
 pub type EIP712VerifyingContractAddress = sp_core::H160;
 pub type EIP712Signature = [u8; 65];
@@ -167,8 +169,8 @@ pub mod pallet {
 				Info = DispatchInfo,
 				PostInfo = PostDispatchInfo,
 			> + GetDispatchInfo
-			+ codec::Decode
-			+ codec::Encode
+			+ scale_codec::Decode
+			+ scale_codec::Encode
 			+ scale_info::TypeInfo
 			+ IsType<<Self as frame_system::Config>::RuntimeCall>;
 
@@ -269,34 +271,39 @@ pub mod pallet {
 				ref tip,
 				ref pre_signed_cheque,
 				ref signature,
-			} = unsigned_call else {
-				return Err(InvalidTransaction::Call.into())
+			} = unsigned_call
+			else {
+				return Err(InvalidTransaction::Call.into());
 			};
 
 			// Check the signature and get the public key
 			let call_data = <T as Config>::RuntimeCall::encode(call);
-			let message_hash = Self::eip712_message_hash(&who, &call_data, nonce, tip, pre_signed_cheque);
+			let message_hash =
+				Self::eip712_message_hash(&who, &call_data, nonce, tip, pre_signed_cheque);
 
-			let Ok(recovered_public_key) = (match <T as Config>::AddressConverter::SECP256K1_PUBLIC_KEY_FORM {
-				Secp256K1PublicKeyForm::Compressed => {
-					sp_io::crypto::secp256k1_ecdsa_recover_compressed(signature, &message_hash)
-						.map(|i| i.to_vec())
-				},
-				Secp256K1PublicKeyForm::Uncompressed => {
-					sp_io::crypto::secp256k1_ecdsa_recover(signature, &message_hash)
-						.map(|i| i.to_vec())
-				}
-			}) else {
-				return Err(InvalidTransaction::Call.into())
+			let Ok(recovered_public_key) =
+				(match <T as Config>::AddressConverter::SECP256K1_PUBLIC_KEY_FORM {
+					Secp256K1PublicKeyForm::Compressed => {
+						sp_io::crypto::secp256k1_ecdsa_recover_compressed(signature, &message_hash)
+							.map(|i| i.to_vec())
+					},
+					Secp256K1PublicKeyForm::Uncompressed => {
+						sp_io::crypto::secp256k1_ecdsa_recover(signature, &message_hash)
+							.map(|i| i.to_vec())
+					},
+				})
+			else {
+				return Err(InvalidTransaction::Call.into());
 			};
 
 			// Deserialize the actual caller
 			let Some(decoded_account) =
-				<T as Config>::AddressConverter::try_convert(&recovered_public_key) else {
-				return Err(InvalidTransaction::Call.into())
+				<T as Config>::AddressConverter::try_convert(&recovered_public_key)
+			else {
+				return Err(InvalidTransaction::Call.into());
 			};
 			if who != &decoded_account {
-				return Err(InvalidTransaction::BadSigner.into())
+				return Err(InvalidTransaction::BadSigner.into());
 			}
 
 			// Skip frame_system::CheckNonZeroSender
@@ -308,7 +315,7 @@ pub mod pallet {
 			// frame_system::CheckNonce<Runtime>
 			let account_nonce = AccountNonce::<T>::get(&who);
 			if nonce < &account_nonce {
-				return Err(InvalidTransaction::Stale.into())
+				return Err(InvalidTransaction::Stale.into());
 			}
 			let provides = (who.clone(), nonce).encode();
 			let requires = if &account_nonce < nonce && nonce > &0u64 {
@@ -322,7 +329,7 @@ pub mod pallet {
 				} else {
 					InvalidTransaction::Future
 				}
-				.into())
+				.into());
 			}
 
 			// Skip frame_system::CheckWeight<Runtime>
@@ -345,69 +352,67 @@ pub mod pallet {
 			// so we have to introducing service fee.
 			let service_fee = T::ServiceFee::get().saturated_into::<u128>();
 
-			if let Some(
-				PreSignedCheque {
-					cheque,
-					signature,
-					signer,
-				}
-			) = pre_signed_cheque {
+			if let Some(PreSignedCheque { cheque, signature, signer }) = pre_signed_cheque {
 				let encoded_cheque = Encode::encode(&cheque);
 				if !signature.verify(&*encoded_cheque, signer) {
 					// NOTE: for security reasons modern UIs implicitly wrap the data requested to sign into
 					// <Bytes></Bytes>, that's why we support both wrapped and raw versions.
 					let prefix = b"<Bytes>";
 					let suffix = b"</Bytes>";
-					let mut wrapped: Vec<u8> = Vec::with_capacity(encoded_cheque.len() + prefix.len() + suffix.len());
+					let mut wrapped: Vec<u8> =
+						Vec::with_capacity(encoded_cheque.len() + prefix.len() + suffix.len());
 					wrapped.extend(prefix);
 					wrapped.extend(&encoded_cheque);
 					wrapped.extend(suffix);
 
 					if !signature.verify(&*wrapped, signer) {
-						return Err(InvalidTransaction::Payment.into())
+						return Err(InvalidTransaction::Payment.into());
 					}
 				}
 
 				if let Some(only_account) = &cheque.only_account {
 					if only_account != who {
-						return Err(InvalidTransaction::Payment.into())
+						return Err(InvalidTransaction::Payment.into());
 					}
 				}
 				if let Some(only_account_nonce) = &cheque.only_account_nonce {
 					if only_account_nonce != &account_nonce {
-						return Err(InvalidTransaction::Payment.into())
+						return Err(InvalidTransaction::Payment.into());
 					}
 				}
 
 				if let Some(only_call_hash) = cheque.only_call_hash {
 					if T::Hashing::hash(&call_data) != only_call_hash {
-						return Err(InvalidTransaction::Payment.into())
+						return Err(InvalidTransaction::Payment.into());
 					}
 				}
 
 				let now = frame_system::Pallet::<T>::block_number();
 				if cheque.deadline < now {
-					return Err(InvalidTransaction::Payment.into())
+					return Err(InvalidTransaction::Payment.into());
 				};
 
-				let usable_balance_for_fees =
-					T::Currency::reducible_balance(&signer, Preservation::Preserve, Fortitude::Polite)
-						.saturated_into::<u128>();
+				let usable_balance_for_fees = T::Currency::reducible_balance(
+					&signer,
+					Preservation::Preserve,
+					Fortitude::Polite,
+				)
+				.saturated_into::<u128>();
 				if est_fee.saturating_add(service_fee) > usable_balance_for_fees {
-					return Err(InvalidTransaction::Payment.into())
+					return Err(InvalidTransaction::Payment.into());
 				}
 				if cheque.sponsor_minimum_balance.saturated_into() > usable_balance_for_fees {
-					return Err(InvalidTransaction::Payment.into())
+					return Err(InvalidTransaction::Payment.into());
 				}
 				if cheque.sponsor_maximum_tip < tip {
-					return Err(InvalidTransaction::Payment.into())
+					return Err(InvalidTransaction::Payment.into());
 				}
 			} else {
 				let usable_balance_for_fees =
 					T::Currency::reducible_balance(&who, Preservation::Preserve, Fortitude::Polite)
 						.saturated_into::<u128>();
 				if est_fee.saturating_add(service_fee) > usable_balance_for_fees {
-					return Err(InvalidTransaction::Payment.into())
+					return Err(InvalidTransaction::Payment.into());
 				}
 			}
 
@@ -484,7 +489,15 @@ pub mod pallet {
 			call: Box<<T as Config>::RuntimeCall>,
 			nonce: Nonce,
 			tip: Option<PaymentBalanceOf<T>>,
-			pre_signed_cheque: Option<PreSignedCheque<BlockNumberFor<T>, PaymentBalanceOf<T>, T::Hash, T::AccountId, T::OffchainSignature>>,
+			pre_signed_cheque: Option<
+				PreSignedCheque<
+					BlockNumberFor<T>,
+					PaymentBalanceOf<T>,
+					T::Hash,
+					T::AccountId,
+					T::OffchainSignature,
+				>,
+			>,
 			#[allow(unused_variables)] signature: EIP712Signature,
 		) -> DispatchResult {
 			// This is an unsigned transaction
@@ -499,7 +512,7 @@ pub mod pallet {
 			// because it already validated in `validate_unsigned` stage,
 			// and it should no way to skip.
 			// TODO: Confirm this.
-			let payer = if let Some(PreSignedCheque {ref signer, .. }) = pre_signed_cheque {
+			let payer = if let Some(PreSignedCheque { ref signer, .. }) = pre_signed_cheque {
 				signer
 			} else {
 				&who
@@ -507,14 +520,15 @@ pub mod pallet {
 
 			// It is possible that an account passed `validate_unsigned` check,
 			// but for some reason, its balance isn't enough for the service fee.
-			use frame_support::traits::tokens::{WithdrawReasons, ExistenceRequirement};
+			use frame_support::traits::tokens::{ExistenceRequirement, WithdrawReasons};
 			// NOTE: it is possible that the account doesn't have enough fee, which is a vulnerable.
 			let withdrawn = T::Currency::withdraw(
 				payer,
 				T::ServiceFee::get(),
 				WithdrawReasons::FEE,
-				ExistenceRequirement::KeepAlive
-			).map_err(|_err| Error::<T>::PaymentError)?;
+				ExistenceRequirement::KeepAlive,
+			)
+			.map_err(|_err| Error::<T>::PaymentError)?;
 			let withdrawn_fee = withdrawn.peek();
 			T::OnUnbalancedForServiceFee::on_unbalanced(withdrawn);
 			Self::deposit_event(Event::ServiceFeePaid {
@@ -526,7 +540,7 @@ pub mod pallet {
 			// Bump the nonce
 			AccountNonce::<T>::try_mutate(&who, |value| {
 				if *value != nonce {
-					return Err(Error::<T>::NonceError)
+					return Err(Error::<T>::NonceError);
 				}
 				*value += 1;
 				Ok(())
@@ -558,8 +572,7 @@ pub mod pallet {
 				.map_err(|_err| Error::<T>::PaymentError)?;
 
 			let call_result = call.dispatch(origin);
-			let post_info =
-				call_result.unwrap_or_else(|error_and_info| error_and_info.post_info);
+			let post_info = call_result.unwrap_or_else(|error_and_info| error_and_info.post_info);
 			// Deposit the call's result
 			Self::deposit_event(Event::CallDone { who: who.clone(), call_result });
 
@@ -574,7 +587,8 @@ pub mod pallet {
 				actual_fee,
 				tip,
 				already_withdrawn,
-			).map_err(|_err| Error::<T>::PaymentError)?;
+			)
+			.map_err(|_err| Error::<T>::PaymentError)?;
 			Self::deposit_event(Event::TransactionFeePaid { who: payer.clone(), actual_fee, tip });
 
 			Ok(())
@@ -590,7 +604,15 @@ pub mod pallet {
 			call_data: &[u8],
 			nonce: &Nonce,
 			tip: &Option<PaymentBalanceOf<T>>,
-			pre_signed_cheque: &Option<PreSignedCheque<BlockNumberFor<T>, PaymentBalanceOf<T>, T::Hash, T::AccountId, T::OffchainSignature>>,
+			pre_signed_cheque: &Option<
+				PreSignedCheque<
+					BlockNumberFor<T>,
+					PaymentBalanceOf<T>,
+					T::Hash,
+					T::AccountId,
+					T::OffchainSignature,
+				>,
+			>,
 		) -> Keccak256Signature {
 			use alloc::vec;
 
@@ -617,14 +639,12 @@ pub mod pallet {
 			];
 			if let Some(tip) = tip {
 				let tip = (*tip).saturated_into::<u128>();
-				message_tokens.push(
-					ethabi::Token::Uint(tip.into())
-				);
+				message_tokens.push(ethabi::Token::Uint(tip.into()));
 			}
 			if let Some(pre_signed_cheque) = pre_signed_cheque {
-				message_tokens.push(
-					ethabi::Token::FixedBytes(sp_io::hashing::keccak_256(&Encode::encode(pre_signed_cheque)).to_vec())
-				);
+				message_tokens.push(ethabi::Token::FixedBytes(
+					sp_io::hashing::keccak_256(&Encode::encode(pre_signed_cheque)).to_vec(),
+				));
 			}
 
 			let message_hash = sp_io::hashing::keccak_256(&ethabi::encode(&message_tokens));
