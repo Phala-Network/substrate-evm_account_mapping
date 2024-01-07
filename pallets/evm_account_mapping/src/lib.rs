@@ -279,7 +279,7 @@ pub mod pallet {
 			// Check the signature and get the public key
 			let call_data = <T as Config>::RuntimeCall::encode(call);
 			let message_hash =
-				Self::eip712_message_hash(&who, &call_data, nonce, tip, pre_signed_cheque);
+				Self::eip712_message_hash(who, &call_data, nonce, tip, pre_signed_cheque);
 
 			let Ok(recovered_public_key) =
 				(match <T as Config>::AddressConverter::SECP256K1_PUBLIC_KEY_FORM {
@@ -313,7 +313,7 @@ pub mod pallet {
 			// Skip frame_system::CheckEra<Runtime>
 
 			// frame_system::CheckNonce<Runtime>
-			let account_nonce = AccountNonce::<T>::get(&who);
+			let account_nonce = AccountNonce::<T>::get(who);
 			if nonce < &account_nonce {
 				return Err(InvalidTransaction::Stale.into());
 			}
@@ -393,7 +393,7 @@ pub mod pallet {
 				};
 
 				let usable_balance_for_fees = T::Currency::reducible_balance(
-					&signer,
+					signer,
 					Preservation::Preserve,
 					Fortitude::Polite,
 				)
@@ -409,7 +409,7 @@ pub mod pallet {
 				}
 			} else {
 				let usable_balance_for_fees =
-					T::Currency::reducible_balance(&who, Preservation::Preserve, Fortitude::Polite)
+					T::Currency::reducible_balance(who, Preservation::Preserve, Fortitude::Polite)
 						.saturated_into::<u128>();
 				if est_fee.saturating_add(service_fee) > usable_balance_for_fees {
 					return Err(InvalidTransaction::Payment.into());
