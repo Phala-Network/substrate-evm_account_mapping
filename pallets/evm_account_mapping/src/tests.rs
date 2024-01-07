@@ -73,7 +73,7 @@ fn evm_transparent_converter_works() {
 	let account_id = sp_core::crypto::AccountId32::from(raw_account);
 
 	assert_eq!(
-		hex::encode(&account_id),
+		hex::encode(account_id),
 		format!("77bb3d64ea13e4f0beafdd5d92508d4643bb09cb{}", hex::encode(b"@evm_address"))
 	);
 
@@ -106,8 +106,7 @@ fn eip712() {
 			hex::decode("0000000000000000000000000000000000000000").expect("Decodable"),
 		)
 		.expect("Decodable")
-		.try_into()
-		.expect("Decodable");
+		.into();
 
 	let eip712_domain = crate::eip712::EIP712Domain {
 		name: eip712_name,
