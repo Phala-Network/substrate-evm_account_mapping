@@ -17,12 +17,12 @@
 
 #[allow(unused)]
 use crate::{mock::*, Error, Event};
-use codec::Decode;
+use scale_codec::Decode;
 use frame_support::assert_ok;
 
+use crate::AddressConversion;
 use sp_core::crypto::Ss58Codec;
 use sp_runtime::traits::TrailingZeroInput;
-use crate::AddressConversion;
 
 #[test]
 fn it_works() {
@@ -74,37 +74,26 @@ fn evm_transparent_converter_works() {
 
 	assert_eq!(
 		hex::encode(&account_id),
-		format!(
-			"77bb3d64ea13e4f0beafdd5d92508d4643bb09cb{}",
-			hex::encode(b"@evm_address")
-		)
+		format!("77bb3d64ea13e4f0beafdd5d92508d4643bb09cb{}", hex::encode(b"@evm_address"))
 	);
 
 	let account_id = crate::EvmTransparentConverter::try_convert(&public_key).expect("Convertable");
 	assert_eq!(
 		hex::encode(&account_id),
-		format!(
-			"77bb3d64ea13e4f0beafdd5d92508d4643bb09cb{}",
-			hex::encode(b"@evm_address")
-		)
+		format!("77bb3d64ea13e4f0beafdd5d92508d4643bb09cb{}", hex::encode(b"@evm_address"))
 	);
-	assert_eq!(
-		account_id.to_string(),
-		"5EmhBEe8vsSfqYseKctWsaQqNKCF9FFao6Mqa9hNfcdF25oE"
-	);
+	assert_eq!(account_id.to_string(), "5EmhBEe8vsSfqYseKctWsaQqNKCF9FFao6Mqa9hNfcdF25oE");
 }
 
 #[test]
 fn evm_substrate_address_converter_works() {
-	let public_key = hex::decode(
-		"027cf2fa7bfe66adad4149481ff86794ce7e1ab2f7ed615ad3918f91581d2c00f1"
-	).expect("Valid");
-	let account_id = crate::SubstrateAddressConverter::try_convert(&public_key).expect("Convertable");
+	let public_key =
+		hex::decode("027cf2fa7bfe66adad4149481ff86794ce7e1ab2f7ed615ad3918f91581d2c00f1")
+			.expect("Valid");
+	let account_id =
+		crate::SubstrateAddressConverter::try_convert(&public_key).expect("Convertable");
 
-	assert_eq!(
-		account_id.to_string(),
-		"5DT96geTS2iLpkH8fAhYAAphNpxddKCV36s5ShVFavf1xQiF"
-	);
+	assert_eq!(account_id.to_string(), "5DT96geTS2iLpkH8fAhYAAphNpxddKCV36s5ShVFavf1xQiF");
 }
 
 #[test]
@@ -130,7 +119,8 @@ fn eip712() {
 	let domain_separator = eip712_domain.separator();
 
 	let type_hash = sp_io::hashing::keccak_256(
-		"SubstrateCall(string who,bytes callData,uint64 nonce,uint128 tip,bytes preSignedCheque)".as_bytes(),
+		"SubstrateCall(string who,bytes callData,uint64 nonce,uint128 tip,bytes preSignedCheque)"
+			.as_bytes(),
 	);
 	// Token::Uint(U256::from(keccak_256(&self.name)))
 	let who = "5DT96geTS2iLpkH8fAhYAAphNpxddKCV36s5ShVFavf1xQiF";
