@@ -109,6 +109,8 @@ const eip712Data = {
 			{ name: 'who', type: 'string' },
 			{ name: 'callData', type: 'bytes' },
 			{ name: 'nonce', type: 'uint64' },
+			{ name: 'tip', type: 'uint128' },
+			{ name: 'preSignedCheque', type: 'bytes' },
 		],
 	},
 	primaryType: "SubstrateCall",
@@ -136,5 +138,5 @@ console.log("")
 
 // Conclusion
 
-console.log("evmAccountMapping.metaCall(who, call, nonce, signature, tip)")
-console.log(`evmAccountMapping.metaCall("${subAddressFromPublicKey}", system.remarkWithEvent("Hello"), ${nonce}, ${eip712Signature}, None)`)
+console.log("evmAccountMapping.metaCall(who, call, nonce, tip, preSignedCheque, signature)")
+console.log(`evmAccountMapping.metaCall("${subAddressFromPublicKey}", system.remarkWithEvent("Hello"), ${nonce}, None, None, ${eip712Signature})`)
