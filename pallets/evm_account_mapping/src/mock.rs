@@ -187,6 +187,11 @@ impl pallet_evm_account_mapping::Config for Test {
 	type EIP712Version = EIP712Version;
 	type EIP712ChainID = EIP712ChainID;
 	type EIP712VerifyingContractAddress = EIP712VerifyingContractAddress;
+	/// Off-chain = signature On-chain - therefore no conversion needed.
+	/// It needs to be From<MultiSignature> for benchmarking.
+	type OffchainSignature = Signature;
+	/// Using `AccountPublic` here makes it trivial to convert to `AccountId` via `into_account()`.
+	type OffchainPublic = AccountPublic;
 	type WeightInfo = ();
 }
 

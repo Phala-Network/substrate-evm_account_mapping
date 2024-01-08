@@ -1,32 +1,28 @@
 //! Service and ServiceFactory implementation. Specialized wrapper over substrate service.
 
-use std::{sync::Arc, time::Duration};
 use futures::FutureExt;
-use sp_core::{crypto::Pair, Encode};
 use node_template_runtime::{self, opaque::Block, RuntimeApi};
 use sc_client_api::{Backend, BlockBackend};
-use sp_api::ProvideRuntimeApi;
 use sc_consensus_aura::{ImportQueueParams, SlotProportion, StartAuraParams};
 use sc_consensus_grandpa::SharedVoterState;
 use sc_service::{error::Error as ServiceError, Configuration, TaskManager, WarpSyncParams};
 use sc_telemetry::{Telemetry, TelemetryWorker};
 use sc_transaction_pool_api::OffchainTransactionPoolFactory;
+use sp_api::ProvideRuntimeApi;
 use sp_consensus_aura::sr25519::AuthorityPair as AuraPair;
+use sp_core::{crypto::Pair, Encode};
 use sp_runtime::{generic, SaturatedConversion};
+use std::{sync::Arc, time::Duration};
 use substrate_frame_rpc_system::AccountNonceApi;
 
 /// Host functions required for the Primal runtime and Substrate node.
 #[cfg(not(feature = "runtime-benchmarks"))]
-pub type HostFunctions = (
-	sp_io::SubstrateHostFunctions,
-);
+pub type HostFunctions = (sp_io::SubstrateHostFunctions,);
 
 /// Host functions required for the Primal runtime and Substrate node.
 #[cfg(feature = "runtime-benchmarks")]
-pub type HostFunctions = (
-	sp_io::SubstrateHostFunctions,
-	frame_benchmarking::benchmarking::HostFunctions,
-);
+pub type HostFunctions =
+	(sp_io::SubstrateHostFunctions, frame_benchmarking::benchmarking::HostFunctions);
 
 /// A specialized `WasmExecutor` intended to use accross substrate node. It provides all required
 /// HostFunctions.
@@ -150,7 +146,7 @@ pub fn new_partial(
 		})
 		.transpose()?;
 
-	let executor = sc_service::new_wasm_executor(&config);
+	let executor = sc_service::new_wasm_executor(config);
 	let (client, backend, keystore_container, task_manager) =
 		sc_service::new_full_parts::<Block, RuntimeApi, _>(
 			config,
