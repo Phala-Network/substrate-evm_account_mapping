@@ -183,7 +183,6 @@ impl pallet_evm_account_mapping::Config for Test {
 	type ServiceFee = ConstU128<1000>;
 	type OnUnbalancedForServiceFee = ();
 	type CallFilter = frame_support::traits::Everything;
-	type SponsoredCallFilter = frame_support::traits::Everything;
 	type EIP712Name = EIP712Name;
 	type EIP712Version = EIP712Version;
 	type EIP712ChainID = EIP712ChainID;

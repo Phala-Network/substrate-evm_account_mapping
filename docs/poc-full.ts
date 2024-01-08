@@ -50,18 +50,16 @@ function createSubstrateApi(rpcUrl: string): ApiPromise | null {
 		throwOnConnect: true,
 		throwOnUnknown: true,
 		types: {
-			Nonce: "u64",
 			Cheque: {
-				deadline: "BlockNumber",
-				sponsor_minimum_balance: "Balance",
-				only_account: "Option<AccountId>",
-				only_account_nonce: "Option<Nonce>",
-				only_call_hash: "Option<Hash>",
-				sponsor_maximum_tip: "Balance",
+				deadline: "u32",
+				onlyAccount: "AccountId32",
+				onlyCallHash: "H256",
+				onlyAccountNonce: "u64",
+				sponsorMaximumTip: "u128",
 			},
 			PreSignedCheque: {
 				cheque: "Cheque",
-				signature: "SpRuntimeMultiSignature",
+				signature: "MultiSignature",
 				signer: "AccountId",
 			}
 		}
@@ -152,16 +150,17 @@ const who = subAddressFromPublicKey
 const call = api.tx.system.remarkWithEvent("Hello")
 const callData = call.method.toHex()
 const callHash = call.method.hash.toHex()
-const nonce = 0
+const nonce = (await api.query.evmAccountMapping.accountNonce(who)).toNumber()
 const tip = 0
 const cheque = api.createType("Cheque", {
 	deadline: 1000,
-	sponsor_minimum_balance: numberToBalance(100),
-	only_account: who,
-	only_account_nonce: null,
-	only_call_hash: callHash,
-	sponsor_maximum_tip: numberToBalance(0),
+	onlyAccount: who,
+	onlyCallHash: callHash,
+	onlyAccountNonce: nonce,
+	sponsorMaximumTip: numberToBalance(0),
 })
+
+console.log(cheque)
 const preSignedCheque = api.createType("PreSignedCheque", {
 	cheque,
 	signature: api.createType("SpRuntimeMultiSignature", {

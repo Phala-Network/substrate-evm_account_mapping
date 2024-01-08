@@ -128,14 +128,12 @@ impl AddressConversion<AccountId32> for EvmTransparentConverter {
 pub struct Cheque<BlockNumber, Balance, Hash, AccountId> {
 	/// The cheque only available before or at the block number.
 	pub deadline: BlockNumber,
-	/// The cheque only available when the sponsor's balance greater or equal than the value.
-	pub sponsor_minimum_balance: Balance,
 	/// Restrict the cheque to a particular account.
-	pub only_account: Option<AccountId>,
-	/// Restrict the caller's hash must equal the value.
-	pub only_account_nonce: Option<Nonce>,
+	pub only_account: AccountId,
 	/// Restrict the cheque to a particular call.
-	pub only_call_hash: Option<Hash>,
+	pub only_call_hash: Hash,
+	/// Restrict the caller's hash must equal the value.
+	pub only_account_nonce: Nonce,
 	/// Sponsor max tip amount, set 0 if you don't want to sponsor any tip
 	pub sponsor_maximum_tip: Balance,
 }
@@ -185,8 +183,6 @@ pub mod pallet {
 		type OnUnbalancedForServiceFee: OnUnbalanced<NegativeImbalanceOf<Self>>;
 
 		type CallFilter: Contains<<Self as frame_system::Config>::RuntimeCall>;
-
-		type SponsoredCallFilter: Contains<<Self as frame_system::Config>::RuntimeCall>;
 
 		#[pallet::constant]
 		type EIP712Name: Get<Vec<u8>>;
@@ -245,7 +241,7 @@ pub mod pallet {
 
 	#[pallet::storage]
 	pub(crate) type AccountNonce<T: Config> =
-		StorageMap<_, Blake2_128Concat, T::AccountId, u64, ValueQuery>;
+		StorageMap<_, Blake2_128Concat, T::AccountId, Nonce, ValueQuery>;
 
 	#[pallet::validate_unsigned]
 	impl<T: Config> ValidateUnsigned for Pallet<T>
@@ -370,21 +366,14 @@ pub mod pallet {
 					}
 				}
 
-				if let Some(only_account) = &cheque.only_account {
-					if only_account != who {
-						return Err(InvalidTransaction::Payment.into());
-					}
+				if cheque.only_account != *who {
+					return Err(InvalidTransaction::Payment.into());
 				}
-				if let Some(only_account_nonce) = &cheque.only_account_nonce {
-					if only_account_nonce != &account_nonce {
-						return Err(InvalidTransaction::Payment.into());
-					}
+				if cheque.only_account_nonce != account_nonce {
+					return Err(InvalidTransaction::Payment.into());
 				}
-
-				if let Some(only_call_hash) = cheque.only_call_hash {
-					if T::Hashing::hash(&call_data) != only_call_hash {
-						return Err(InvalidTransaction::Payment.into());
-					}
+				if T::Hashing::hash(&call_data) != cheque.only_call_hash {
+					return Err(InvalidTransaction::Payment.into());
 				}
 
 				let now = frame_system::Pallet::<T>::block_number();
@@ -399,12 +388,6 @@ pub mod pallet {
 				)
 				.saturated_into::<u128>();
 				if est_fee.saturating_add(service_fee) > usable_balance_for_fees {
-					return Err(InvalidTransaction::Payment.into());
-				}
-				if cheque.sponsor_minimum_balance.saturated_into() > usable_balance_for_fees {
-					return Err(InvalidTransaction::Payment.into());
-				}
-				if cheque.sponsor_maximum_tip < tip {
 					return Err(InvalidTransaction::Payment.into());
 				}
 			} else {
@@ -548,13 +531,8 @@ pub mod pallet {
 
 			// Call
 			let mut origin: T::RuntimeOrigin = RawOrigin::Signed(who.clone()).into();
-			if let Some(PreSignedCheque { ref cheque, .. }) = pre_signed_cheque {
-				if cheque.only_call_hash.is_none() {
-					origin.add_filter(T::SponsoredCallFilter::contains);
-				}
-			} else {
-				origin.add_filter(T::CallFilter::contains);
-			}
+			origin.add_filter(T::CallFilter::contains);
+
 			let len = call.encoded_size();
 			let info = call.get_dispatch_info();
 			let tip = tip.unwrap_or(0u32.into());
