@@ -212,7 +212,7 @@ function ConnectButton() {
           const [address] = await walletClient.requestAddresses()
           setWalletClient(walletClient)
           const SS58Prefix = (_api!.consts.system?.ss58Prefix as u16).toNumber()
-          const mappedAccount = await getMappingAccount(walletClient, { address: address }, { SS58Prefix })
+          const mappedAccount = await getMappingAccount(_api!, walletClient, { address: address }, { SS58Prefix })
           setMappingAccount(mappedAccount)
           setIsSupport(true)
         } finally {
@@ -286,8 +286,8 @@ function MappingAddress() {
               <div className="px-4 py-2.5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-0">
                 <dt className="text-sm font-medium leading-6 text-gray-900 flex items-center">Mapping Substrate Address</dt>
                 <dd className="mt-1 text-sm leading-6 text-gray-700 sm:col-span-2 sm:mt-0 font-mono overflow-x-scroll md:overflow-auto scroll-smooth py-2">
-                  <a href={`${blockExplorer}/${prefix}/${mappedAccount?.address}`} target="_blank" className="inline-flex gap-1.5 items-center">
-                    {mappedAccount?.address}
+                  <a href={`${blockExplorer}/${prefix}/${mappedAccount?.substrateAddress}`} target="_blank" className="inline-flex gap-1.5 items-center">
+                    {mappedAccount?.substrateAddress}
                     <span><ArrowTopRightOnSquareIcon className="w-4 h-4 text-blue-600" /></span>
                   </a>
                 </dd>
@@ -315,7 +315,7 @@ function AccountBalance() {
     let unsub: any = () => {}
     (async function() {
       unsub = await apiPromise.query.system.account(
-        mappedAccount.address,
+        mappedAccount.substrateAddress,
         (info: FrameSystemAccountInfo) => setBalance(info.data.free.toBigInt()))
     })()
     return () => {
@@ -355,7 +355,7 @@ function ClaimTestToken() {
           setTrxId('')
           const keyring = new Keyring({ type: 'sr25519' })
           const alice = keyring.addFromUri('//Alice')
-          const result = await signAndSend(apiPromise.tx.balances.transferAllowDeath(mappedAccount.address, 1e12 * 10), alice)
+          const result = await signAndSend(apiPromise.tx.balances.transferAllowDeath(mappedAccount.substrateAddress, 1e12 * 10), alice)
           const trxId = result.status.asInBlock.toHex()
           setTrxId(trxId)
         } finally {
@@ -602,4 +602,4 @@ export function Stage() {
       </div>
     </div>
   )
-} 
+}

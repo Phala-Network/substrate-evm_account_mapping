@@ -1,144 +1,46 @@
 import type { ApiPromise, SubmittableResult } from '@polkadot/api'
 import type { ApiTypes, Signer as InjectedSigner } from '@polkadot/api/types'
 import type { AddressOrPair, SubmittableExtrinsic } from '@polkadot/api-base/types/submittable'
-import type { U256, U64 } from '@polkadot/types-codec'
-import { hexToString, hexToU8a, u8aToHex } from '@polkadot/util'
-import { blake2AsU8a, encodeAddress, secp256k1Compress } from '@polkadot/util-crypto'
+import { encodeAddress } from '@polkadot/util-crypto'
+import type { Account, Address, WalletClient } from 'viem'
 
-import type { Account, Address, Hex, TestClient, WalletClient } from 'viem'
-import { hashMessage, recoverPublicKey } from 'viem'
-import type { signTypedData } from 'viem/wallet'
-import { signMessage } from 'viem/wallet'
+import { recoverEvmPubkey, evmPublicKeyToSubstrateRawAddressU8a } from './addressConverter'
+import { createEip712Domain, createSubstrateCall, createEip712StructedDataSubstrateCall } from './eip712'
 
-
-type SignTypedDataInput = Parameters<typeof signTypedData>[1]
-
-/**
- * Get compressed formatted ether address for a specified account via a Wallet Client.
- */
-export async function etherAddressToCompressedPubkey(
-  client: WalletClient | TestClient,
-  account: Account,
-  msg = 'Allows to access the pubkey address.'
-) {
-  const sign = await signMessage(client, { account, message: msg })
-  const hash = hashMessage(msg)
-  const recovered = await recoverPublicKey({ hash, signature: sign })
-  const compressedPubkey = u8aToHex(secp256k1Compress(hexToU8a(recovered)))
-  return compressedPubkey
-}
 
 export interface EtherAddressToSubstrateAddressOptions {
   SS58Prefix?: number
   msg?: string
 }
 
-export interface Eip712Domain {
-  name: string
-  version: string
-  chainId: number
-  verifyingContract: Address
-}
-
-export function createEip712Domain(api: ApiPromise): Eip712Domain {
-  try {
-    const name = hexToString(api.consts.evmAccountMapping.eip712Name.toString())
-    const version = hexToString(api.consts.evmAccountMapping.eip712Version.toString())
-    const chainId = (api.consts.evmAccountMapping.eip712ChainID as U256).toNumber()
-    const verifyingContract = api.consts.evmAccountMapping.eip712VerifyingContractAddress.toString() as Address
-    return {
-      name,
-      version,
-      chainId,
-      verifyingContract,
-    }
-  } catch (_err) {
-    throw new Error(
-      'Create Eip712Domain object failed, possibly due to the unavailability of the evmAccountMapping pallet.'
-    )
-  }
-}
-
-export interface SubstrateCall {
-  who: string
-  callData: string
-  nonce: number
-}
-
-export async function createSubstrateCall<T extends ApiTypes>(
-  api: ApiPromise,
-  substrateAddress: string,
-  extrinsic: SubmittableExtrinsic<T>
-) {
-  const nonce = await api.query.evmAccountMapping.accountNonce<U64>(substrateAddress)
-  return {
-    who: substrateAddress,
-    callData: extrinsic.inner.toHex(),
-    nonce: nonce.toNumber(),
-  }
-}
-
-/**
- * @params account Account  The viem WalletAccount instance for signging.
- * @params who string       The SS58 formated address of the account.
- * @params callData string  The encoded call data, usually create with `api.tx.foo.bar.inner.toHex()`
- * @params nonce number     The nonce of the account.
- */
-export function createEip712StructedDataSubstrateCall(
-  account: Account,
-  domain: Eip712Domain,
-  message: SubstrateCall
-): SignTypedDataInput {
-  return {
-    account,
-    types: {
-      EIP712Domain: [
-        {
-          name: 'name',
-          type: 'string',
-        },
-        {
-          name: 'version',
-          type: 'string',
-        },
-        {
-          name: 'chainId',
-          type: 'uint256',
-        },
-        {
-          name: 'verifyingContract',
-          type: 'address',
-        },
-      ],
-      SubstrateCall: [
-        { name: 'who', type: 'string' },
-        { name: 'callData', type: 'bytes' },
-        { name: 'nonce', type: 'uint64' },
-      ],
-    },
-    primaryType: 'SubstrateCall',
-    domain: domain,
-    message: { ...message },
-  }
-}
-
 export interface MappingAccount {
   evmAddress: Address
-  compressedPubkey: Hex
-  address: Address
+  substrateAddress: Address
+  SS58Prefix: number
 }
 
 export async function getMappingAccount(
+  api: ApiPromise,
   client: WalletClient,
   account: Account | { address: `0x${string}` },
   { SS58Prefix = 30, msg }: EtherAddressToSubstrateAddressOptions = {}
 ) {
-  const compressedPubkey = await etherAddressToCompressedPubkey(client, account as Account, msg)
-  const substratePubkey = encodeAddress(blake2AsU8a(hexToU8a(compressedPubkey)), SS58Prefix)
+    const version = api.consts.evmAccountMapping.eip712Version.toString()
+    if (version !== '0x31' && version !== '0x32') {
+      throw new Error(
+        `Unsupported evm_account_mapping pallet version: consts.evmAccountMapping.eip712Version = ${version}`
+      )
+    }
+    const recoveredPubkey = await recoverEvmPubkey(client, account as Account, msg)
+    const converter = version === '0x32' ? 'EvmTransparentConverter' : 'SubstrateAddressConverter'
+    const address = encodeAddress(
+      evmPublicKeyToSubstrateRawAddressU8a(recoveredPubkey.compressed, converter),
+      SS58Prefix
+    )
   return {
     evmAddress: account.address,
-    compressedPubkey,
-    address: substratePubkey,
+    substrateAddress: address,
+    SS58Prefix,
   } as MappingAccount
 }
 
@@ -221,14 +123,14 @@ export async function signAndSendEvm<TSubmittableResult extends SubmittableResul
   client: WalletClient,
   account: MappingAccount,
 ): Promise<TSubmittableResult> {
-  const substrateCall = await createSubstrateCall(apiPromise, account.address, extrinsic)
+  const substrateCall = await createSubstrateCall(apiPromise, account.substrateAddress, extrinsic)
   const domain = createEip712Domain(apiPromise)
-  const typedData = createEip712StructedDataSubstrateCall({ address: account.evmAddress } as Account, domain, substrateCall)
-  const signature = await client.signTypedData(typedData)
+  const typedData = createEip712StructedDataSubstrateCall(domain, substrateCall)
+  const signature = await client.signTypedData({ ...typedData, account: account.evmAddress })
   return await new Promise(async (resolve, reject) => {
     try {
       const _extrinsic = apiPromise.tx.evmAccountMapping.metaCall(
-        account.address,
+        account.substrateAddress,
         substrateCall.callData,
         substrateCall.nonce,
         signature,
