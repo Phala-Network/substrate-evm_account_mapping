@@ -13,7 +13,7 @@ publish = false
 targets = ["x86_64-unknown-linux-gnu"]
 
 [dependencies]
-codec = { package = "parity-scale-codec", version = "3.6.5", default-features = false, features = ["derive"] }
+codec = { package = "parity-scale-codec", version = "3.6.5", default-features = false, features = ["derive", "max-encoded-len"] }
 scale-info = { version = "2.10.0", default-features = false, features = ["derive", "serde"] }
 serde_json = { version = "1.0.108", default-features = false, features = ["alloc"] }
 
@@ -48,6 +48,8 @@ pallet-transaction-payment-rpc-runtime-api = { git = "https://github.com/parityt
 # Used for runtime benchmarking
 frame-benchmarking = { git = "https://github.com/paritytech/polkadot-sdk", branch = "master", default-features = false, optional = true }
 frame-system-benchmarking = { git = "https://github.com/paritytech/polkadot-sdk", branch = "master", default-features = false, optional = true }
+
+pallet-nfts = { git = "https://github.com/paritytech/polkadot-sdk", branch = "master", default-features = false }
 
 # Local Dependencies
 pallet-evm_account_mapping = { path = "../pallets/evm_account_mapping", default-features = false }
@@ -90,9 +92,11 @@ std = [
 	"sp-transaction-pool/std",
 	"sp-version/std",
 	"substrate-wasm-builder",
+	"pallet-nfts/std",
 	"pallet-evm_account_mapping/std",
 ]
 runtime-benchmarks = [
+	"sp-runtime/runtime-benchmarks",
 	"frame-benchmarking/runtime-benchmarks",
 	"frame-support/runtime-benchmarks",
 	"frame-system-benchmarking/runtime-benchmarks",
@@ -101,7 +105,7 @@ runtime-benchmarks = [
 	"pallet-grandpa/runtime-benchmarks",
 	"pallet-sudo/runtime-benchmarks",
 	"pallet-timestamp/runtime-benchmarks",
-	"sp-runtime/runtime-benchmarks",
+	"pallet-nfts/runtime-benchmarks",
 	"pallet-evm_account_mapping/runtime-benchmarks",
 ]
 try-runtime = [
@@ -115,5 +119,6 @@ try-runtime = [
 	"pallet-sudo/try-runtime",
 	"pallet-timestamp/try-runtime",
 	"pallet-transaction-payment/try-runtime",
+	"pallet-nfts/try-runtime",
 	"pallet-evm_account_mapping/try-runtime",
 ]
