@@ -50,7 +50,6 @@ macro_rules! log {
 }
 
 use alloc::{boxed::Box, vec::Vec};
-use scale_codec::{Decode, Encode};
 use frame_support::{
 	dispatch::{DispatchInfo, GetDispatchInfo, PostDispatchInfo, RawOrigin},
 	traits::{
@@ -62,6 +61,7 @@ use frame_support::{
 	Parameter,
 };
 use pallet_transaction_payment::OnChargeTransaction;
+use scale_codec::{Decode, Encode};
 use scale_info::TypeInfo;
 use sp_core::crypto::AccountId32;
 use sp_io::hashing::blake2_256;

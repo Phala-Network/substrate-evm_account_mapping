@@ -53,7 +53,7 @@ mod benchmarks {
 		T::Currency::make_free_balance_be(&account, BalanceOf::<T>::max_value() / 2u32.into());
 
 		#[extrinsic_call]
-		_(RawOrigin::None, account, Box::new(call.into()), nonce, None, None, signature,);
+		_(RawOrigin::None, account, Box::new(call.into()), nonce, None, None, signature);
 
 		Ok(())
 	}

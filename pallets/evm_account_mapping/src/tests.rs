@@ -17,8 +17,8 @@
 
 #[allow(unused)]
 use crate::{mock::*, Error, Event};
-use scale_codec::Decode;
 use frame_support::assert_ok;
+use scale_codec::Decode;
 
 use crate::AddressConversion;
 use sp_core::crypto::Ss58Codec;
