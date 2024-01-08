@@ -159,8 +159,6 @@ const cheque = api.createType("Cheque", {
 	onlyAccountNonce: nonce,
 	sponsorMaximumTip: numberToBalance(0),
 })
-
-console.log(cheque)
 const preSignedCheque = api.createType("PreSignedCheque", {
 	cheque,
 	signature: api.createType("SpRuntimeMultiSignature", {
