@@ -66,6 +66,7 @@ impl pallet_evm_account_mapping::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type RuntimeCall = RuntimeCall;
 	type Currency = Balances;
+    type AddressConverter = pallet_evm_account_mapping::SubstrateAddressConverter;
 	type ServiceFee = ConstU128<10000000000>;
 	type OnUnbalancedForServiceFee = DealWithServiceFee;
 	type CallFilter = frame_support::traits::Everything;
