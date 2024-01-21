@@ -24,7 +24,6 @@ use sp_runtime::{
 	ApplyExtrinsicResult, MultiSignature,
 };
 
-use sp_std::prelude::*;
 #[cfg(feature = "std")]
 use sp_version::NativeVersion;
 use sp_version::RuntimeVersion;
