@@ -15,6 +15,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use alloc::{vec, vec::Vec};
 /// Port from https://github.com/gakonst/ethers-rs/blob/master/ethers-core/src/types/transaction/eip712.rs
 /// Replace hash provided by `sp_io`
 use ethabi::{
@@ -23,7 +24,6 @@ use ethabi::{
 	token::Token,
 };
 use sp_io::hashing::keccak_256;
-use sp_std::{vec, vec::Vec};
 
 /// Pre-computed value of the following statement:
 ///

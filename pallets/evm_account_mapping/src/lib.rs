@@ -17,6 +17,8 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
+extern crate alloc;
+
 pub use pallet::*;
 
 mod eip712;
@@ -47,6 +49,7 @@ macro_rules! log {
 	};
 }
 
+use alloc::{boxed::Box, vec::Vec};
 use codec::Decode;
 use frame_support::{dispatch::{DispatchInfo, GetDispatchInfo, PostDispatchInfo, RawOrigin}, Parameter, traits::{
 	tokens::{Fortitude, Preservation},
@@ -115,7 +118,6 @@ pub mod pallet {
 	use super::*;
 	use frame_support::{pallet_prelude::*, traits::OnUnbalanced};
 	use frame_system::pallet_prelude::*;
-	use sp_std::prelude::*;
 
 	#[pallet::pallet]
 	pub struct Pallet<T>(_);
@@ -470,7 +472,7 @@ pub mod pallet {
 			call_data: &[u8],
 			nonce: Nonce,
 		) -> Keccak256Signature {
-			use sp_std::vec;
+			use alloc::vec;
 
 			// TODO: will refactor this in Kevin's way for performance.
 			let eip712_domain = crate::eip712::EIP712Domain {

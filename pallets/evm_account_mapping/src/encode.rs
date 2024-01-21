@@ -32,7 +32,7 @@ pub enum SolidityDataType<'a> {
 
 pub mod abi {
 	use super::SolidityDataType;
-	use sp_std::{vec, vec::Vec};
+	use alloc::{vec, vec::Vec};
 
 	/// Pack a single `SolidityDataType` into bytes
 	#[allow(clippy::needless_lifetimes)]

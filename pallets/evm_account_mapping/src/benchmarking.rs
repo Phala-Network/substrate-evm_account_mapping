@@ -25,7 +25,6 @@ use frame_benchmarking::v2::*;
 use frame_system::RawOrigin;
 
 use codec::Decode;
-use sp_std::prelude::*;
 use sp_core::crypto::Ss58Codec;
 use sp_runtime::traits::{Bounded, TrailingZeroInput};
 
