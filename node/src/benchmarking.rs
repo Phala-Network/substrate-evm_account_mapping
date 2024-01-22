@@ -4,7 +4,7 @@
 
 use crate::service::{create_extrinsic, FullClient};
 
-use node_template_runtime::{BalancesCall, SystemCall, AccountId, Balance};
+use node_template_runtime::{AccountId, Balance, BalancesCall, SystemCall};
 use sc_cli::Result;
 use sp_inherents::{InherentData, InherentDataProvider};
 use sp_keyring::Sr25519Keyring;
@@ -43,7 +43,7 @@ impl frame_benchmarking_cli::ExtrinsicBuilder for RemarkBuilder {
 			SystemCall::remark { remark: vec![] },
 			Some(nonce),
 		)
-			.into();
+		.into();
 
 		Ok(extrinsic)
 	}
@@ -79,13 +79,10 @@ impl frame_benchmarking_cli::ExtrinsicBuilder for TransferKeepAliveBuilder {
 		let extrinsic: OpaqueExtrinsic = create_extrinsic(
 			self.client.as_ref(),
 			acc,
-			BalancesCall::transfer_keep_alive {
-				dest: self.dest.clone().into(),
-				value: self.value.into(),
-			},
+			BalancesCall::transfer_keep_alive { dest: self.dest.clone().into(), value: self.value },
 			Some(nonce),
 		)
-			.into();
+		.into();
 
 		Ok(extrinsic)
 	}

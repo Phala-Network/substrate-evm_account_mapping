@@ -9,6 +9,8 @@ include!(concat!(env!("OUT_DIR"), "/wasm_binary.rs"));
 extern crate alloc;
 
 use alloc::{boxed::Box, vec::Vec};
+use frame_support::genesis_builder_helper::{build_config, create_default_config};
+use frame_system::EnsureSigned;
 use pallet_grandpa::AuthorityId as GrandpaId;
 use sp_api::impl_runtime_apis;
 use sp_consensus_aura::sr25519::AuthorityId as AuraId;
@@ -21,18 +23,17 @@ use sp_runtime::{
 	transaction_validity::{TransactionSource, TransactionValidity},
 	ApplyExtrinsicResult, MultiSignature,
 };
+
 #[cfg(feature = "std")]
 use sp_version::NativeVersion;
 use sp_version::RuntimeVersion;
 
-use frame_support::genesis_builder_helper::{build_config, create_default_config};
 // A few exports that help ease life for downstream crates.
 pub use frame_support::{
-	construct_runtime, parameter_types, derive_impl,
+	construct_runtime, derive_impl, parameter_types,
 	traits::{
-		tokens::fungible::Credit, ConstBool, ConstU128, ConstU32, ConstU64, ConstU8,
-		KeyOwnerProofSystem, OnUnbalanced, Randomness, StorageInfo,
-		Currency,
+		tokens::fungible::Credit, AsEnsureOriginWithArg, ConstBool, ConstU128, ConstU32, ConstU64,
+		ConstU8, Currency, KeyOwnerProofSystem, OnUnbalanced, Randomness, StorageInfo,
 	},
 	weights::{
 		constants::{
@@ -51,6 +52,10 @@ use pallet_transaction_payment::{ConstFeeMultiplier, CurrencyAdapter, Multiplier
 pub use sp_runtime::BuildStorage;
 pub use sp_runtime::{Perbill, Permill};
 
+pub const MILLI_CENTS: Balance = 1_000_000_000;
+pub const CENTS: Balance = 1_000 * MILLI_CENTS; // assume this is worth about a cent.
+pub const DOLLARS: Balance = 100 * CENTS;
+
 /// An index to a block.
 pub type BlockNumber = u32;
 
@@ -60,6 +65,8 @@ pub type Signature = MultiSignature;
 /// Some way of identifying an account on the chain. We intentionally make it equivalent
 /// to the public key of our transaction signing scheme.
 pub type AccountId = <<Signature as Verify>::Signer as IdentifyAccount>::AccountId;
+
+pub type AccountPublic = <Signature as Verify>::Signer;
 
 /// Balance of an account.
 pub type Balance = u128;
@@ -271,6 +278,49 @@ impl pallet_sudo::Config for Runtime {
 }
 
 parameter_types! {
+	pub Features: pallet_nfts::PalletFeatures = pallet_nfts::PalletFeatures::all_enabled();
+	pub const StringLimit: u32 = 50;
+	pub const MetadataDepositBase: Balance = 10 * DOLLARS;
+	pub const MetadataDepositPerByte: Balance = 1 * DOLLARS;
+	pub const MaxAttributesPerCall: u32 = 10;
+	pub const CollectionDeposit: Balance = 100 * DOLLARS;
+	pub const ItemDeposit: Balance = 1 * DOLLARS;
+	pub const ApprovalsLimit: u32 = 20;
+	pub const ItemAttributesApprovalsLimit: u32 = 20;
+	pub const MaxTips: u32 = 10;
+	pub const MaxDeadlineDuration: BlockNumber = 12 * 30 * DAYS;
+}
+
+impl pallet_nfts::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	type CollectionId = u32;
+	type ItemId = u32;
+	type Currency = Balances;
+	type ForceOrigin = frame_system::EnsureRoot<AccountId>;
+	type CollectionDeposit = CollectionDeposit;
+	type ItemDeposit = ItemDeposit;
+	type MetadataDepositBase = MetadataDepositBase;
+	type AttributeDepositBase = MetadataDepositBase;
+	type DepositPerByte = MetadataDepositPerByte;
+	type StringLimit = ConstU32<256>;
+	type KeyLimit = ConstU32<64>;
+	type ValueLimit = ConstU32<256>;
+	type ApprovalsLimit = ApprovalsLimit;
+	type ItemAttributesApprovalsLimit = ItemAttributesApprovalsLimit;
+	type MaxTips = MaxTips;
+	type MaxDeadlineDuration = MaxDeadlineDuration;
+	type MaxAttributesPerCall = MaxAttributesPerCall;
+	type Features = Features;
+	type OffchainSignature = Signature;
+	type OffchainPublic = AccountPublic;
+	type WeightInfo = pallet_nfts::weights::SubstrateWeight<Runtime>;
+	#[cfg(feature = "runtime-benchmarks")]
+	type Helper = ();
+	type CreateOrigin = AsEnsureOriginWithArg<EnsureSigned<AccountId>>;
+	type Locker = ();
+}
+
+parameter_types! {
 	pub EIP712Name: Vec<u8> = b"Substrate".to_vec();
 	pub EIP712Version: Vec<u8> = b"1".to_vec();
 	pub EIP712ChainID: pallet_evm_account_mapping::EIP712ChainID = sp_core::U256::from(0);
@@ -289,6 +339,8 @@ impl pallet_evm_account_mapping::Config for Runtime {
 	type EIP712Version = EIP712Version;
 	type EIP712ChainID = EIP712ChainID;
 	type EIP712VerifyingContractAddress = EIP712VerifyingContractAddress;
+	type OffchainSignature = Signature;
+	type OffchainPublic = AccountPublic;
 	type WeightInfo = pallet_evm_account_mapping::weights::SubstrateWeight<Runtime>;
 }
 
@@ -302,6 +354,7 @@ construct_runtime!(
 		Balances: pallet_balances,
 		TransactionPayment: pallet_transaction_payment,
 		Sudo: pallet_sudo,
+		Nfts: pallet_nfts,
 		EvmAccountMapping: pallet_evm_account_mapping,
 	}
 );
@@ -357,6 +410,7 @@ mod benches {
 		[pallet_balances, Balances]
 		[pallet_timestamp, Timestamp]
 		[pallet_sudo, Sudo]
+		[pallet_nfts, Nfts]
 		[pallet_evm_account_mapping, EvmAccountMapping]
 	);
 }
